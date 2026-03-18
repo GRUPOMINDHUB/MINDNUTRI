@@ -1,0 +1,74 @@
+{% extends 'painel/base.html' %}
+{% block title %}Fichas Geradas — Mindnutri{% endblock %}
+{% block page_title %}Fichas Geradas{% endblock %}
+
+{% block content %}
+<div class="card">
+  <form method="get" class="filtros">
+    <input class="filtro-input" type="text" name="q"
+           placeholder="Buscar por prato ou assinante..."
+           value="{{ busca }}" style="flex:1;min-width:220px">
+    <select class="filtro-input" name="tipo" onchange="this.form.submit()">
+      <option value="">Todos os tipos</option>
+      <option value="tecnica"     {% if tipo_filtro == 'tecnica' %}selected{% endif %}>Ficha Técnica (XLSX)</option>
+      <option value="operacional" {% if tipo_filtro == 'operacional' %}selected{% endif %}>Ficha Operacional (PDF)</option>
+      <option value="custo_rapido"{% if tipo_filtro == 'custo_rapido' %}selected{% endif %}>Custo Rápido</option>
+    </select>
+    <button type="submit" class="btn btn-primary btn-sm">Filtrar</button>
+    {% if busca or tipo_filtro %}
+    <a href="{% url 'fichas' %}" class="btn btn-ghost btn-sm">Limpar</a>
+    {% endif %}
+  </form>
+
+  <div class="card-body">
+    {% if fichas %}
+    <table>
+      <thead>
+        <tr>
+          <th>Prato</th>
+          <th>Tipo</th>
+          <th>Assinante</th>
+          <th>Nicho</th>
+          <th>Custo total</th>
+          <th>Custo/porção</th>
+          <th>Porções</th>
+          <th>Data</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for f in fichas %}
+        <tr>
+          <td><strong>{{ f.nome_prato }}</strong></td>
+          <td>
+            {% if f.tipo == 'tecnica' %}
+              <span class="badge badge-info">XLSX</span>
+            {% elif f.tipo == 'operacional' %}
+              <span class="badge badge-ativo">PDF</span>
+            {% else %}
+              <span class="badge badge-inadimplente">Custo</span>
+            {% endif %}
+          </td>
+          <td>
+            <a href="{% url 'assinante_detalhe' f.assinante.pk %}"
+               style="color:#cc0000;text-decoration:none;font-weight:500">
+              {{ f.assinante.nome }}
+            </a>
+          </td>
+          <td style="font-size:.82rem">{{ f.assinante.get_nicho_display }}</td>
+          <td>{% if f.custo_total %}R$ {{ f.custo_total }}{% else %}—{% endif %}</td>
+          <td>{% if f.custo_porcao %}R$ {{ f.custo_porcao }}{% else %}—{% endif %}</td>
+          <td>{{ f.num_porcoes|default:"—" }}</td>
+          <td style="font-size:.78rem;color:#888">{{ f.criada_em|date:"d/m/Y H:i" }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <div class="empty-state">
+      <div class="empty-icon">▤</div>
+      <p>Nenhuma ficha encontrada.</p>
+    </div>
+    {% endif %}
+  </div>
+</div>
+{% endblock %}

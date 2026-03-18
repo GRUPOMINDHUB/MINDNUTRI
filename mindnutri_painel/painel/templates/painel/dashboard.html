@@ -1,0 +1,186 @@
+{% extends 'painel/base.html' %}
+{% block title %}Dashboard — Mindnutri{% endblock %}
+{% block page_title %}Dashboard{% endblock %}
+
+{% block content %}
+
+<!-- MÉTRICAS PRINCIPAIS -->
+<div class="metrics-grid">
+  <div class="metric-card">
+    <span class="metric-icon">◉</span>
+    <div class="metric-label">Assinantes ativos</div>
+    <div class="metric-value verde">{{ ativos }}</div>
+    <div class="metric-sub">+{{ novos_30d }} nos últimos 30 dias</div>
+  </div>
+  <div class="metric-card">
+    <span class="metric-icon">◈</span>
+    <div class="metric-label">Receita mensal estimada</div>
+    <div class="metric-value">R$ {{ receita_mensal|floatformat:0 }}</div>
+    <div class="metric-sub">{{ ativos }} × R$59,90</div>
+  </div>
+  <div class="metric-card">
+    <span class="metric-icon">▤</span>
+    <div class="metric-label">Fichas geradas hoje</div>
+    <div class="metric-value">{{ novas_fichas_hoje }}</div>
+    <div class="metric-sub">Total de assinantes: {{ total_assinantes }}</div>
+  </div>
+  <div class="metric-card">
+    <span class="metric-icon">◎</span>
+    <div class="metric-label">Inadimplentes</div>
+    <div class="metric-value {% if inadimplentes > 0 %}vermelho{% endif %}">{{ inadimplentes }}</div>
+    <div class="metric-sub">Bloqueados: {{ bloqueados }}</div>
+  </div>
+</div>
+
+<!-- LINHA 2: Alertas fichas + Notificações -->
+<div class="grid-2">
+
+  <!-- Assinantes próximos do limite -->
+  <div class="card">
+    <div class="card-header">
+      <span class="card-title">⚠ Próximos do limite de fichas</span>
+      <a href="{% url 'assinantes' %}" class="btn btn-ghost btn-sm">Ver todos</a>
+    </div>
+    <div class="card-body">
+      {% if alerta_fichas %}
+      <table>
+        <thead>
+          <tr>
+            <th>Assinante</th>
+            <th>Nicho</th>
+            <th>Uso</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for a in alerta_fichas %}
+          <tr>
+            <td>
+              <strong>{{ a.nome }}</strong><br>
+              <span style="font-size:.75rem;color:#888">{{ a.estabelecimento }}</span>
+            </td>
+            <td>{{ a.get_nicho_display }}</td>
+            <td style="min-width:120px">
+              <div style="display:flex;align-items:center;gap:8px">
+                <div class="progress-wrap" style="flex:1">
+                  <div class="progress-bar {% if a.percentual_fichas >= 90 %}vermelho{% else %}amarelo{% endif %}"
+                       style="width:{{ a.percentual_fichas }}%"></div>
+                </div>
+                <span style="font-size:.78rem;white-space:nowrap">{{ a.fichas_geradas_mes }}/{{ a.fichas_limite_mes }}</span>
+              </div>
+            </td>
+            <td><a href="{% url 'assinante_detalhe' a.pk %}" class="btn btn-ghost btn-sm">Ver</a></td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+      {% else %}
+      <div class="empty-state">
+        <div class="empty-icon">✓</div>
+        <p>Nenhum assinante próximo do limite</p>
+      </div>
+      {% endif %}
+    </div>
+  </div>
+
+  <!-- Notificações recentes -->
+  <div class="card">
+    <div class="card-header">
+      <span class="card-title">🔔 Notificações recentes</span>
+      <a href="{% url 'notificacoes' %}" class="btn btn-ghost btn-sm">Ver todas</a>
+    </div>
+    <div class="card-body">
+      {% if notificacoes %}
+        {% for n in notificacoes %}
+        <div class="notif-item nao-lida">
+          <div class="notif-icon {{ n.nivel }}">
+            {% if n.nivel == 'critico' %}🔴{% elif n.nivel == 'aviso' %}🟡{% else %}🔵{% endif %}
+          </div>
+          <div class="notif-text">
+            <div class="titulo">{{ n.titulo }}</div>
+            <div class="msg">{{ n.mensagem|truncatechars:80 }}</div>
+            <div class="notif-time">{{ n.criada_em|timesince }} atrás</div>
+          </div>
+        </div>
+        {% endfor %}
+      {% else %}
+      <div class="empty-state">
+        <div class="empty-icon">✓</div>
+        <p>Sem notificações pendentes</p>
+      </div>
+      {% endif %}
+    </div>
+  </div>
+
+</div>
+
+<!-- Últimas fichas + Distribuição por nicho -->
+<div class="grid-2">
+
+  <!-- Últimas fichas -->
+  <div class="card">
+    <div class="card-header">
+      <span class="card-title">▤ Últimas fichas geradas</span>
+      <a href="{% url 'fichas' %}" class="btn btn-ghost btn-sm">Ver todas</a>
+    </div>
+    <div class="card-body">
+      {% if ultimas_fichas %}
+      <table>
+        <thead>
+          <tr><th>Prato</th><th>Tipo</th><th>Assinante</th><th>Quando</th></tr>
+        </thead>
+        <tbody>
+          {% for f in ultimas_fichas %}
+          <tr>
+            <td><strong>{{ f.nome_prato }}</strong></td>
+            <td>
+              {% if f.tipo == 'tecnica' %}
+                <span class="badge badge-info">XLSX</span>
+              {% elif f.tipo == 'operacional' %}
+                <span class="badge badge-ativo">PDF</span>
+              {% else %}
+                <span class="badge badge-inadimplente">Custo</span>
+              {% endif %}
+            </td>
+            <td>{{ f.assinante.nome|truncatechars:20 }}</td>
+            <td style="font-size:.78rem;color:#888">{{ f.criada_em|timesince }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+      {% else %}
+      <div class="empty-state"><p>Nenhuma ficha gerada ainda</p></div>
+      {% endif %}
+    </div>
+  </div>
+
+  <!-- Distribuição por nicho -->
+  <div class="card">
+    <div class="card-header">
+      <span class="card-title">◈ Assinantes por nicho</span>
+    </div>
+    <div class="card-body" style="padding:20px">
+      {% for n in nichos %}
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:14px">
+        <div style="min-width:130px;font-size:.87rem;font-weight:500">
+          {% if n.nicho == 'hamburguer' %}🍔 Hambúrguer
+          {% elif n.nicho == 'pizza' %}🍕 Pizza
+          {% elif n.nicho == 'sobremesa' %}🍰 Sobremesa
+          {% elif n.nicho == 'comida_brasileira' %}🍲 Comida Brasileira
+          {% else %}🍽 Outro{% endif %}
+        </div>
+        <div class="progress-wrap" style="flex:1">
+          {% widthratio n.total total_assinantes 100 as pct %}
+          <div class="progress-bar" style="width:{{ pct }}%"></div>
+        </div>
+        <div style="font-size:.82rem;color:#888;min-width:20px;text-align:right">{{ n.total }}</div>
+      </div>
+      {% empty %}
+      <div class="empty-state"><p>Sem dados ainda</p></div>
+      {% endfor %}
+    </div>
+  </div>
+
+</div>
+
+{% endblock %}

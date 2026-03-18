@@ -1,0 +1,125 @@
+{% extends 'painel/base.html' %}
+{% block title %}Assinantes — Mindnutri{% endblock %}
+{% block page_title %}Assinantes{% endblock %}
+
+{% block content %}
+
+<div class="metrics-grid" style="grid-template-columns:repeat(4,1fr)">
+  <div class="metric-card">
+    <div class="metric-label">Total</div>
+    <div class="metric-value">{{ total_assinantes }}</div>
+  </div>
+  <div class="metric-card">
+    <div class="metric-label">Ativos</div>
+    <div class="metric-value verde">{{ ativos }}</div>
+  </div>
+  <div class="metric-card">
+    <div class="metric-label">Bloqueados</div>
+    <div class="metric-value {% if bloqueados > 0 %}vermelho{% endif %}">{{ bloqueados }}</div>
+  </div>
+  <div class="metric-card">
+    <div class="metric-label">Inadimplentes</div>
+    <div class="metric-value {% if inadimplentes > 0 %}vermelho{% endif %}">{{ inadimplentes }}</div>
+  </div>
+</div>
+
+<div class="card">
+  <!-- Filtros -->
+  <form method="get" class="filtros">
+    <input class="filtro-input" type="text" name="q"
+           placeholder="Buscar por nome, estabelecimento ou telefone..."
+           value="{{ busca }}" style="flex:1;min-width:220px">
+
+    <select class="filtro-input" name="status" onchange="this.form.submit()">
+      <option value="">Todos os status</option>
+      <option value="ativo"       {% if status_filtro == 'ativo' %}selected{% endif %}>Ativo</option>
+      <option value="bloqueado"   {% if status_filtro == 'bloqueado' %}selected{% endif %}>Bloqueado</option>
+      <option value="inadimplente"{% if status_filtro == 'inadimplente' %}selected{% endif %}>Inadimplente</option>
+      <option value="cancelado"   {% if status_filtro == 'cancelado' %}selected{% endif %}>Cancelado</option>
+    </select>
+
+    <select class="filtro-input" name="nicho" onchange="this.form.submit()">
+      <option value="">Todos os nichos</option>
+      <option value="hamburguer"       {% if nicho_filtro == 'hamburguer' %}selected{% endif %}>Hambúrguer</option>
+      <option value="pizza"            {% if nicho_filtro == 'pizza' %}selected{% endif %}>Pizza</option>
+      <option value="sobremesa"        {% if nicho_filtro == 'sobremesa' %}selected{% endif %}>Sobremesa</option>
+      <option value="comida_brasileira"{% if nicho_filtro == 'comida_brasileira' %}selected{% endif %}>Comida Brasileira</option>
+    </select>
+
+    <button type="submit" class="btn btn-primary btn-sm">Filtrar</button>
+    {% if busca or status_filtro or nicho_filtro %}
+    <a href="{% url 'assinantes' %}" class="btn btn-ghost btn-sm">Limpar</a>
+    {% endif %}
+  </form>
+
+  <div class="card-body">
+    {% if assinantes %}
+    <table>
+      <thead>
+        <tr>
+          <th>Assinante</th>
+          <th>Nicho</th>
+          <th>Cidade</th>
+          <th>Status</th>
+          <th>Fichas (mês)</th>
+          <th>Próx. cobrança</th>
+          <th>Desde</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for a in assinantes %}
+        <tr>
+          <td>
+            <strong>{{ a.nome }}</strong><br>
+            <span style="font-size:.75rem;color:#888">{{ a.estabelecimento }}</span>
+          </td>
+          <td>
+            {% if a.nicho == 'hamburguer' %}🍔
+            {% elif a.nicho == 'pizza' %}🍕
+            {% elif a.nicho == 'sobremesa' %}🍰
+            {% elif a.nicho == 'comida_brasileira' %}🍲
+            {% else %}🍽{% endif %}
+            {{ a.get_nicho_display }}
+          </td>
+          <td style="font-size:.82rem">{{ a.cidade|default:"—" }}</td>
+          <td>
+            <span class="badge badge-{{ a.status }}">{{ a.get_status_display }}</span>
+          </td>
+          <td style="min-width:110px">
+            <div style="display:flex;align-items:center;gap:6px">
+              <div class="progress-wrap" style="width:60px">
+                <div class="progress-bar {% if a.percentual_fichas >= 90 %}{% elif a.percentual_fichas >= 70 %}amarelo{% else %}verde{% endif %}"
+                     style="width:{{ a.percentual_fichas }}%"></div>
+              </div>
+              <span style="font-size:.78rem">{{ a.fichas_geradas_mes }}/{{ a.fichas_limite_mes }}</span>
+            </div>
+          </td>
+          <td style="font-size:.82rem">
+            {% if a.proxima_cobranca %}
+              {{ a.proxima_cobranca|date:"d/m/Y" }}
+              {% if a.dias_ate_cobranca is not None %}
+                {% if a.dias_ate_cobranca <= 5 %}
+                  <span style="color:#cc0000;font-size:.72rem">({{ a.dias_ate_cobranca }}d)</span>
+                {% endif %}
+              {% endif %}
+            {% else %}—{% endif %}
+          </td>
+          <td style="font-size:.82rem;color:#888">{{ a.data_inicio|date:"d/m/Y" }}</td>
+          <td>
+            <a href="{% url 'assinante_detalhe' a.pk %}" class="btn btn-ghost btn-sm">Detalhes →</a>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <div class="empty-state">
+      <div class="empty-icon">◉</div>
+      <p>Nenhum assinante encontrado com os filtros selecionados.</p>
+    </div>
+    {% endif %}
+  </div>
+</div>
+
+{% endblock %}

@@ -1,0 +1,509 @@
+{"event": "messages.upsert", "instance": "mindnutri", "data": {"key": {"remoteJid": "120487254442161@lid", "fromMe": false, "id": "A5FF2A0C02AFBC7617D8759DE63DB832"}, "pushName": "Julio Bezerra", "message": {"conversation": "Oi", "messageContextInfo": {"deviceListMetadata": {"senderKeyHash": "drNQo5VgyLXknw==", "senderTimestamp": "1773166980", "recipientKeyHash": "gowwIIgJEb1Z7g==", "recipientTimestamp": "1773751925"}, "deviceListMetadataVersion": 2, "messageSecret": "vcg7r6uvnrf9K/CH0Pf7XUje2LfqJi6APfmGc9Ei0nU="}}, "messageType": "conversation", "messageTimestamp": 1773772311, "owner": "mindnutri", "source": "android"}, "destination": "http://host.docker.internal:8000/webhook/whatsapp/", "date_time": "2026-03-17T15:32:07.600Z", "sender": "5521976275296@s.whatsapp.net", "server_url": "http://localhost:8080", "apikey": "f94d35gjcws06leuc7d9sc"}
+
+{
+  "event": "messages.upsert",
+  "instance": "mindnutri",
+  "data": {
+    "key": {
+      "remoteJid": "5521986786204@s.whatsapp.net",
+      "fromMe": false,
+      "id": "3EB0D1D70FA44C450A8390"
+    },
+    "pushName": "Julio Bezerra",
+    "message": {
+      "conversation": "oi",
+      "messageContextInfo": {
+        "deviceListMetadata": {
+          "senderKeyHash": "drNQo5VgyLXknw==",
+          "senderTimestamp": "1773166980",
+          "senderAccountType": "E2EE",
+          "receiverAccountType": "E2EE",
+          "recipientKeyHash": "gowwIIgJEb1Z7g==",
+          "recipientTimestamp": "1773270147"
+        },
+        "deviceListMetadataVersion": 2,
+        "messageSecret": "/hKr3KJ+/wX/EHvwG05Lis5pg0YvXzYUanLaKryCFxs="
+      }
+    },
+    "messageType": "conversation",
+    "messageTimestamp": 1773772517,
+    "owner": "mindnutri",
+    "source": "web"
+  },
+  "destination": "http://host.docker.internal:8000/webhook/whatsapp/",
+  "date_time": "2026-03-17T15:35:34.324Z",
+  "sender": "5521976275296@s.whatsapp.net",
+  "server_url": "http://localhost:8080",
+  "apikey": "f94d35gjcws06leuc7d9sc"
+}
+
+---
+
+{
+  "event": "messages.upsert",
+  "instance": "mindnutri",
+  "data": {
+    "key": {
+      "remoteJid": "5521986786204@s.whatsapp.net",
+      "fromMe": false,
+      "id": "3EB0ABFB0D6215EE331D87"
+    },
+    "pushName": "Julio Bezerra",
+    "message": {
+      "conversation": "quem é vc ?",
+      "messageContextInfo": {
+        "deviceListMetadata": {
+          "senderKeyHash": "drNQo5VgyLXknw==",
+          "senderTimestamp": "1773166980",
+          "senderAccountType": "E2EE",
+          "receiverAccountType": "E2EE",
+          "recipientKeyHash": "gowwIIgJEb1Z7g==",
+          "recipientTimestamp": "1773270147"
+        },
+        "deviceListMetadataVersion": 2,
+        "messageSecret": "a4bKr7u4xJpoM5UdKxwMWG8kjCRW37LklhJpzegnJ/c="
+      }
+    },
+    "messageType": "conversation",
+    "messageTimestamp": 1773772529,
+    "owner": "mindnutri",
+    "source": "web"
+  },
+  "destination": "http://host.docker.internal:8000/webhook/whatsapp/",
+  "date_time": "2026-03-17T15:35:46.157Z",
+  "sender": "5521976275296@s.whatsapp.net",
+  "server_url": "http://localhost:8080",
+  "apikey": "f94d35gjcws06leuc7d9sc"
+}
+
+---
+
+{
+  "event": "messages.upsert",
+  "instance": "mindnutri",
+  "data": {
+    "key": {
+      "remoteJid": "5521986786204@s.whatsapp.net",
+      "fromMe": false,
+      "id": "3EB07E88954BA35DA22446"
+    },
+    "pushName": "Julio Bezerra",
+    "message": {
+      "conversation": "quero ajuda pra fazer minhas fichas técnicas",
+      "messageContextInfo": {
+        "deviceListMetadata": {
+          "senderKeyHash": "drNQo5VgyLXknw==",
+          "senderTimestamp": "1773166980",
+          "senderAccountType": "E2EE",
+          "receiverAccountType": "E2EE",
+          "recipientKeyHash": "gowwIIgJEb1Z7g==",
+          "recipientTimestamp": "1773270147"
+        },
+        "deviceListMetadataVersion": 2,
+        "messageSecret": "M6+h8UaFrPKzLFsjR/Tj+WiZZUgJTNAF8t3ceqvwbB0="
+      }
+    },
+    "messageType": "conversation",
+    "messageTimestamp": 1773772547,
+    "owner": "mindnutri",
+    "source": "web"
+  },
+  "destination": "http://host.docker.internal:8000/webhook/whatsapp/",
+  "date_time": "2026-03-17T15:36:04.197Z",
+  "sender": "5521976275296@s.whatsapp.net",
+  "server_url": "http://localhost:8080",
+  "apikey": "f94d35gjcws06leuc7d9sc"
+}
+
+---
+
+{
+  "event": "messages.upsert",
+  "instance": "mindnutri",
+  "data": {
+    "key": {
+      "remoteJid": "5521986786204@s.whatsapp.net",
+      "fromMe": false,
+      "id": "3EB0A9DBFFB79A03C6CD53"
+    },
+    "pushName": "Julio Bezerra",
+    "message": {
+      "conversation": "BEIJINHO",
+      "messageContextInfo": {
+        "deviceListMetadata": {
+          "senderKeyHash": "drNQo5VgyLXknw==",
+          "senderTimestamp": "1773166980",
+          "senderAccountType": "E2EE",
+          "receiverAccountType": "E2EE",
+          "recipientKeyHash": "gowwIIgJEb1Z7g==",
+          "recipientTimestamp": "1773270147"
+        },
+        "deviceListMetadataVersion": 2,
+        "messageSecret": "BPKn1U/ta6yMK/fg4XCrccWAp7U948xaZhzm8plYRek="
+      }
+    },
+    "messageType": "conversation",
+    "messageTimestamp": 1773772677,
+    "owner": "mindnutri",
+    "source": "web"
+  },
+  "destination": "http://host.docker.internal:8000/webhook/whatsapp/",
+  "date_time": "2026-03-17T15:38:14.264Z",
+  "sender": "5521976275296@s.whatsapp.net",
+  "server_url": "http://localhost:8080",
+  "apikey": "f94d35gjcws06leuc7d9sc"
+}
+
+---
+
+{
+  "event": "messages.upsert",
+  "instance": "mindnutri",
+  "data": {
+    "key": {
+      "remoteJid": "5521986786204@s.whatsapp.net",
+      "fromMe": false,
+      "id": "3EB00734C8E6A5D4B41201"
+    },
+    "pushName": "Julio Bezerra",
+    "message": {
+      "conversation": "sobremesa",
+      "messageContextInfo": {
+        "deviceListMetadata": {
+          "senderKeyHash": "drNQo5VgyLXknw==",
+          "senderTimestamp": "1773166980",
+          "senderAccountType": "E2EE",
+          "receiverAccountType": "E2EE",
+          "recipientKeyHash": "gowwIIgJEb1Z7g==",
+          "recipientTimestamp": "1773270147"
+        },
+        "deviceListMetadataVersion": 2,
+        "messageSecret": "WR9pohVPS9HO7AiIh0HDxqAQ9JXAfkuY1Jowcvh8fP8="
+      }
+    },
+    "messageType": "conversation",
+    "messageTimestamp": 1773772709,
+    "owner": "mindnutri",
+    "source": "web"
+  },
+  "destination": "http://host.docker.internal:8000/webhook/whatsapp/",
+  "date_time": "2026-03-17T15:38:46.445Z",
+  "sender": "5521976275296@s.whatsapp.net",
+  "server_url": "http://localhost:8080",
+  "apikey": "f94d35gjcws06leuc7d9sc"
+}
+
+---
+
+{
+  "event": "messages.upsert",
+  "instance": "mindnutri",
+  "data": {
+    "key": {
+      "remoteJid": "5521986786204@s.whatsapp.net",
+      "fromMe": false,
+      "id": "3EB041586E363E0FFA8112"
+    },
+    "pushName": "Julio Bezerra",
+    "message": {
+      "conversation": "1 receita gera 12 unidades",
+      "messageContextInfo": {
+        "deviceListMetadata": {
+          "senderKeyHash": "drNQo5VgyLXknw==",
+          "senderTimestamp": "1773166980",
+          "senderAccountType": "E2EE",
+          "receiverAccountType": "E2EE",
+          "recipientKeyHash": "gowwIIgJEb1Z7g==",
+          "recipientTimestamp": "1773270147"
+        },
+        "deviceListMetadataVersion": 2,
+        "messageSecret": "ITQho+HTvi4aS+D2hkKiDvECCSo98t/B/oTlFaLlAlw="
+      }
+    },
+    "messageType": "conversation",
+    "messageTimestamp": 1773772729,
+    "owner": "mindnutri",
+    "source": "web"
+  },
+  "destination": "http://host.docker.internal:8000/webhook/whatsapp/",
+  "date_time": "2026-03-17T15:39:06.279Z",
+  "sender": "5521976275296@s.whatsapp.net",
+  "server_url": "http://localhost:8080",
+  "apikey": "f94d35gjcws06leuc7d9sc"
+}
+
+---
+
+{
+  "event": "messages.upsert",
+  "instance": "mindnutri",
+  "data": {
+    "key": {
+      "remoteJid": "5521986786204@s.whatsapp.net",
+      "fromMe": false,
+      "id": "3EB005E361312C150205D3"
+    },
+    "pushName": "Julio Bezerra",
+    "message": {
+      "conversation": "1 lata de leite condensado",
+      "messageContextInfo": {
+        "deviceListMetadata": {
+          "senderKeyHash": "drNQo5VgyLXknw==",
+          "senderTimestamp": "1773166980",
+          "senderAccountType": "E2EE",
+          "receiverAccountType": "E2EE",
+          "recipientKeyHash": "gowwIIgJEb1Z7g==",
+          "recipientTimestamp": "1773270147"
+        },
+        "deviceListMetadataVersion": 2,
+        "messageSecret": "YhXVq68F0Ox/Mt4J8khY02jToqLHvLxgNbbCYHQlNDQ="
+      }
+    },
+    "messageType": "conversation",
+    "messageTimestamp": 1773772744,
+    "owner": "mindnutri",
+    "source": "web"
+  },
+  "destination": "http://host.docker.internal:8000/webhook/whatsapp/",
+  "date_time": "2026-03-17T15:39:21.363Z",
+  "sender": "5521976275296@s.whatsapp.net",
+  "server_url": "http://localhost:8080",
+  "apikey": "f94d35gjcws06leuc7d9sc"
+}
+
+---
+
+{
+  "event": "messages.upsert",
+  "instance": "mindnutri",
+  "data": {
+    "key": {
+      "remoteJid": "5521986786204@s.whatsapp.net",
+      "fromMe": false,
+      "id": "3EB0B588EC11CB64AC171E"
+    },
+    "pushName": "Julio Bezerra",
+    "message": {
+      "conversation": "395 \n\n4,99",
+      "messageContextInfo": {
+        "deviceListMetadata": {
+          "senderKeyHash": "drNQo5VgyLXknw==",
+          "senderTimestamp": "1773166980",
+          "senderAccountType": "E2EE",
+          "receiverAccountType": "E2EE",
+          "recipientKeyHash": "gowwIIgJEb1Z7g==",
+          "recipientTimestamp": "1773270147"
+        },
+        "deviceListMetadataVersion": 2,
+        "messageSecret": "tMcFfSFLw+iRzOv/vi228E9EKLYGdGZ5AHu9G4CfMdg="
+      }
+    },
+    "messageType": "conversation",
+    "messageTimestamp": 1773772760,
+    "owner": "mindnutri",
+    "source": "web"
+  },
+  "destination": "http://host.docker.internal:8000/webhook/whatsapp/",
+  "date_time": "2026-03-17T15:39:37.540Z",
+  "sender": "5521976275296@s.whatsapp.net",
+  "server_url": "http://localhost:8080",
+  "apikey": "f94d35gjcws06leuc7d9sc"
+}
+
+---
+
+{
+  "event": "messages.upsert",
+  "instance": "mindnutri",
+  "data": {
+    "key": {
+      "remoteJid": "5521986786204@s.whatsapp.net",
+      "fromMe": false,
+      "id": "3EB0BAC9DBCBB3A27BF1FC"
+    },
+    "pushName": "Julio Bezerra",
+    "message": {
+      "conversation": "COMEÇA DO ZERO",
+      "messageContextInfo": {
+        "deviceListMetadata": {
+          "senderKeyHash": "drNQo5VgyLXknw==",
+          "senderTimestamp": "1773166980",
+          "senderAccountType": "E2EE",
+          "receiverAccountType": "E2EE",
+          "recipientKeyHash": "gowwIIgJEb1Z7g==",
+          "recipientTimestamp": "1773270147"
+        },
+        "deviceListMetadataVersion": 2,
+        "messageSecret": "74nBv0qAeOfCBUY8sHPVwALBcy1Rd3DQr2HPhQjr0LA="
+      }
+    },
+    "messageType": "conversation",
+    "messageTimestamp": 1773773148,
+    "owner": "mindnutri",
+    "source": "web"
+  },
+  "destination": "http://host.docker.internal:8000/webhook/whatsapp/",
+  "date_time": "2026-03-17T15:46:04.737Z",
+  "sender": "5521976275296@s.whatsapp.net",
+  "server_url": "http://localhost:8080",
+  "apikey": "f94d35gjcws06leuc7d9sc"
+}
+
+---
+
+{
+  "event": "messages.upsert",
+  "instance": "mindnutri",
+  "data": {
+    "key": {
+      "remoteJid": "5521986786204@s.whatsapp.net",
+      "fromMe": false,
+      "id": "3EB08DFBBC5660C639F7BD"
+    },
+    "pushName": "Julio Bezerra",
+    "message": {
+      "conversation": "brigadeiro\n12 unidade\n20g",
+      "messageContextInfo": {
+        "deviceListMetadata": {
+          "senderKeyHash": "drNQo5VgyLXknw==",
+          "senderTimestamp": "1773166980",
+          "senderAccountType": "E2EE",
+          "receiverAccountType": "E2EE",
+          "recipientKeyHash": "gowwIIgJEb1Z7g==",
+          "recipientTimestamp": "1773270147"
+        },
+        "deviceListMetadataVersion": 2,
+        "messageSecret": "2KSayY1trhivwcIAyImrjLCNOagPxcKBwhsoIQlLafA="
+      }
+    },
+    "messageType": "conversation",
+    "messageTimestamp": 1773773178,
+    "owner": "mindnutri",
+    "source": "web"
+  },
+  "destination": "http://host.docker.internal:8000/webhook/whatsapp/",
+  "date_time": "2026-03-17T15:46:34.910Z",
+  "sender": "5521976275296@s.whatsapp.net",
+  "server_url": "http://localhost:8080",
+  "apikey": "f94d35gjcws06leuc7d9sc"
+}
+
+---
+
+{
+  "event": "messages.upsert",
+  "instance": "mindnutri",
+  "data": {
+    "key": {
+      "remoteJid": "5521986786204@s.whatsapp.net",
+      "fromMe": false,
+      "id": "3EB05FBA3CF528F0B33262"
+    },
+    "pushName": "Julio Bezerra",
+    "message": {
+      "conversation": "leite condensado 395g 4,99\nchocolate uso 150g e pago 40 reais no kg\nmanteiga uso 50g e gasto 12 reais em 400g\ncreme de leite 1 caixa 3,99",
+      "messageContextInfo": {
+        "deviceListMetadata": {
+          "senderKeyHash": "drNQo5VgyLXknw==",
+          "senderTimestamp": "1773166980",
+          "senderAccountType": "E2EE",
+          "receiverAccountType": "E2EE",
+          "recipientKeyHash": "gowwIIgJEb1Z7g==",
+          "recipientTimestamp": "1773270147"
+        },
+        "deviceListMetadataVersion": 2,
+        "messageSecret": "ge9E8F+WOfRwu2pRr7+DBMUdfmT/2PsZ7EEw5mcT/Ww="
+      }
+    },
+    "messageType": "conversation",
+    "messageTimestamp": 1773773260,
+    "owner": "mindnutri",
+    "source": "web"
+  },
+  "destination": "http://host.docker.internal:8000/webhook/whatsapp/",
+  "date_time": "2026-03-17T15:47:57.395Z",
+  "sender": "5521976275296@s.whatsapp.net",
+  "server_url": "http://localhost:8080",
+  "apikey": "f94d35gjcws06leuc7d9sc"
+}
+
+---
+
+{
+  "event": "messages.upsert",
+  "instance": "mindnutri",
+  "data": {
+    "key": {
+      "remoteJid": "5521986786204@s.whatsapp.net",
+      "fromMe": false,
+      "id": "3EB0D95B2999E48CF6DF3A"
+    },
+    "pushName": "Julio Bezerra",
+    "message": {
+      "conversation": "pode",
+      "messageContextInfo": {
+        "deviceListMetadata": {
+          "senderKeyHash": "drNQo5VgyLXknw==",
+          "senderTimestamp": "1773166980",
+          "senderAccountType": "E2EE",
+          "receiverAccountType": "E2EE",
+          "recipientKeyHash": "gowwIIgJEb1Z7g==",
+          "recipientTimestamp": "1773270147"
+        },
+        "deviceListMetadataVersion": 2,
+        "messageSecret": "asJEuM94Fcif47Z9G0Tc3ZP1ONhpCGfP9C7GG9aSc5Q="
+      }
+    },
+    "messageType": "conversation",
+    "messageTimestamp": 1773773280,
+    "owner": "mindnutri",
+    "source": "web"
+  },
+  "destination": "http://host.docker.internal:8000/webhook/whatsapp/",
+  "date_time": "2026-03-17T15:48:17.545Z",
+  "sender": "5521976275296@s.whatsapp.net",
+  "server_url": "http://localhost:8080",
+  "apikey": "f94d35gjcws06leuc7d9sc"
+}
+
+---
+
+{
+  "event": "messages.upsert",
+  "instance": "mindnutri",
+  "data": {
+    "key": {
+      "remoteJid": "5521986786204@s.whatsapp.net",
+      "fromMe": false,
+      "id": "3EB05B9B53548F340152C3"
+    },
+    "pushName": "Julio Bezerra",
+    "message": {
+      "conversation": "gerar",
+      "messageContextInfo": {
+        "deviceListMetadata": {
+          "senderKeyHash": "drNQo5VgyLXknw==",
+          "senderTimestamp": "1773166980",
+          "senderAccountType": "E2EE",
+          "receiverAccountType": "E2EE",
+          "recipientKeyHash": "gowwIIgJEb1Z7g==",
+          "recipientTimestamp": "1773270147"
+        },
+        "deviceListMetadataVersion": 2,
+        "messageSecret": "oWKCdzMq5e8QeHTQtKXHuA1QFKO9LCT8F9aoSoQvoHs="
+      }
+    },
+    "messageType": "conversation",
+    "messageTimestamp": 1773773290,
+    "owner": "mindnutri",
+    "source": "web"
+  },
+  "destination": "http://host.docker.internal:8000/webhook/whatsapp/",
+  "date_time": "2026-03-17T15:48:27.571Z",
+  "sender": "5521976275296@s.whatsapp.net",
+  "server_url": "http://localhost:8080",
+  "apikey": "f94d35gjcws06leuc7d9sc"
+}
+
+---
+

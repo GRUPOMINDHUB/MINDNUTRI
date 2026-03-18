@@ -1,0 +1,137 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Mindnutri — Login</title>
+<link href="https://fonts.googleapis.com/css2?family=Syne:wght@700;800&family=DM+Sans:wght@300;400;500&display=swap" rel="stylesheet">
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+body{
+  font-family:'DM Sans',sans-serif;
+  background:#0e0e0e;
+  min-height:100vh;
+  display:flex;align-items:center;justify-content:center;
+  position:relative;overflow:hidden;
+}
+/* Fundo com padrão geométrico sutil */
+body::before{
+  content:'';position:absolute;inset:0;
+  background-image:
+    linear-gradient(rgba(204,0,0,.04) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(204,0,0,.04) 1px, transparent 1px);
+  background-size:40px 40px;
+}
+/* Glow vermelho de fundo */
+body::after{
+  content:'';position:absolute;
+  width:600px;height:600px;
+  border-radius:50%;
+  background:radial-gradient(circle, rgba(204,0,0,.12) 0%, transparent 70%);
+  top:50%;left:50%;transform:translate(-50%,-50%);
+  pointer-events:none;
+}
+.login-box{
+  position:relative;z-index:1;
+  width:100%;max-width:400px;
+  padding:0 20px;
+}
+.login-logo{
+  text-align:center;margin-bottom:36px;
+}
+.login-logo img{height:44px}
+.logo-fallback{
+  font-family:'Syne',sans-serif;font-size:1.6rem;font-weight:800;
+  color:#fff;letter-spacing:1px;
+}
+.logo-fallback span{color:#cc0000}
+.login-sub{
+  font-size:.8rem;letter-spacing:2px;text-transform:uppercase;
+  color:#555;margin-top:6px;
+}
+.login-card{
+  background:#1a1a1a;
+  border:1px solid #2a2a2a;
+  border-radius:16px;
+  padding:36px;
+}
+.login-title{
+  font-family:'Syne',sans-serif;font-weight:700;font-size:1.1rem;
+  color:#fff;margin-bottom:24px;
+}
+.form-group{margin-bottom:18px}
+label{
+  display:block;font-size:.78rem;letter-spacing:.5px;text-transform:uppercase;
+  color:#666;margin-bottom:6px
+}
+input[type=text],input[type=password]{
+  width:100%;
+  padding:11px 14px;
+  background:#242424;
+  border:1px solid #333;
+  border-radius:8px;
+  color:#fff;font-size:.9rem;
+  outline:none;transition:border .15s;
+  font-family:'DM Sans',sans-serif;
+}
+input:focus{border-color:#cc0000}
+.btn-login{
+  width:100%;
+  padding:12px;
+  background:#cc0000;
+  border:none;border-radius:8px;
+  color:#fff;font-weight:600;font-size:.95rem;
+  cursor:pointer;
+  font-family:'Syne',sans-serif;
+  letter-spacing:.5px;
+  transition:background .15s;
+  margin-top:8px;
+}
+.btn-login:hover{background:#e60000}
+.erros{
+  background:#2a1010;border:1px solid #5a1a1a;
+  border-radius:8px;padding:10px 14px;
+  margin-bottom:18px;color:#ff6b6b;font-size:.85rem
+}
+.login-footer{
+  text-align:center;margin-top:20px;
+  font-size:.75rem;color:#444
+}
+</style>
+</head>
+<body>
+<div class="login-box">
+  <div class="login-logo">
+    <img src="{% static 'painel/img/logo_mindhub.png' %}" alt="Mindhub"
+         onerror="this.style.display='none';document.querySelector('.logo-fallback').style.display='block'">
+    <div class="logo-fallback" style="display:none">MIND<span>HUB</span></div>
+    <div class="login-sub">Mindnutri · Painel de Gestão</div>
+  </div>
+
+  <div class="login-card">
+    <div class="login-title">Acesso restrito</div>
+
+    {% if form.errors %}
+    <div class="erros">Usuário ou senha incorretos. Tente novamente.</div>
+    {% endif %}
+
+    <form method="post">
+      {% csrf_token %}
+      <div class="form-group">
+        <label for="id_username">Usuário</label>
+        <input type="text" id="id_username" name="username" autofocus autocomplete="username">
+      </div>
+      <div class="form-group">
+        <label for="id_password">Senha</label>
+        <input type="password" id="id_password" name="password" autocomplete="current-password">
+      </div>
+      <input type="hidden" name="next" value="{{ next }}">
+      <button type="submit" class="btn-login">Entrar →</button>
+    </form>
+  </div>
+
+  <div class="login-footer">Mindnutri é um produto do ecossistema Mindhub</div>
+</div>
+</body>
+</html>

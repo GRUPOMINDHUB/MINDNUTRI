@@ -1,0 +1,197 @@
+{% extends 'painel/base.html' %}
+{% block title %}{{ assinante.nome }} — Mindnutri{% endblock %}
+{% block page_title %}
+  <a href="{% url 'assinantes' %}" style="color:#888;text-decoration:none">Assinantes</a>
+  <span style="color:#ccc;margin:0 8px">/</span>
+  {{ assinante.nome }}
+{% endblock %}
+
+{% block content %}
+
+<div class="detalhe-grid">
+
+  <!-- Card info principal -->
+  <div class="card" style="padding:24px">
+    <div style="display:flex;align-items:center;gap:16px;margin-bottom:24px">
+      <div style="width:56px;height:56px;border-radius:50%;background:#cc0000;
+                  display:flex;align-items:center;justify-content:center;
+                  font-family:'Syne',sans-serif;font-weight:800;font-size:1.4rem;color:#fff;flex-shrink:0">
+        {{ assinante.nome|slice:":1"|upper }}
+      </div>
+      <div>
+        <div style="font-family:'Syne',sans-serif;font-weight:700;font-size:1.1rem">{{ assinante.nome }}</div>
+        <div style="font-size:.85rem;color:#888">{{ assinante.estabelecimento }}</div>
+        <span class="badge badge-{{ assinante.status }}" style="margin-top:4px">{{ assinante.get_status_display }}</span>
+      </div>
+    </div>
+
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
+      <div class="info-group">
+        <div class="info-label">Telefone</div>
+        <div class="info-value">{{ assinante.telefone }}</div>
+      </div>
+      <div class="info-group">
+        <div class="info-label">Instagram</div>
+        <div class="info-value">{{ assinante.instagram|default:"—" }}</div>
+      </div>
+      <div class="info-group">
+        <div class="info-label">Cidade</div>
+        <div class="info-value">{{ assinante.cidade|default:"—" }}</div>
+      </div>
+      <div class="info-group">
+        <div class="info-label">Nicho</div>
+        <div class="info-value">{{ assinante.get_nicho_display }}</div>
+      </div>
+      <div class="info-group">
+        <div class="info-label">Funcionários</div>
+        <div class="info-value">{{ assinante.funcionarios }}</div>
+      </div>
+      <div class="info-group">
+        <div class="info-label">Faturamento estimado</div>
+        <div class="info-value">{{ assinante.faturamento_estimado|default:"—" }}</div>
+      </div>
+      <div class="info-group">
+        <div class="info-label">Assinante desde</div>
+        <div class="info-value">{{ assinante.data_inicio|date:"d/m/Y" }}</div>
+      </div>
+      <div class="info-group">
+        <div class="info-label">Próxima cobrança</div>
+        <div class="info-value">{{ assinante.proxima_cobranca|date:"d/m/Y"|default:"—" }}</div>
+      </div>
+    </div>
+
+    {% if assinante.observacoes %}
+    <div class="info-group" style="margin-top:16px">
+      <div class="info-label">Observações</div>
+      <div class="info-value" style="white-space:pre-line">{{ assinante.observacoes }}</div>
+    </div>
+    {% endif %}
+  </div>
+
+  <!-- Card uso + ações -->
+  <div style="display:flex;flex-direction:column;gap:16px">
+
+    <!-- Métricas de uso -->
+    <div class="card" style="padding:20px">
+      <div style="font-family:'Syne',sans-serif;font-weight:700;margin-bottom:16px">Uso este mês</div>
+
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+        <span style="font-size:.85rem;color:#888">Fichas geradas</span>
+        <span style="font-weight:600">{{ assinante.fichas_geradas_mes }} / {{ assinante.fichas_limite_mes }}</span>
+      </div>
+      <div class="progress-wrap" style="height:10px;margin-bottom:16px">
+        <div class="progress-bar {% if assinante.percentual_fichas >= 90 %}{% elif assinante.percentual_fichas >= 70 %}amarelo{% else %}verde{% endif %}"
+             style="width:{{ assinante.percentual_fichas }}%"></div>
+      </div>
+
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+        <div style="background:#f8f8f8;border-radius:8px;padding:12px;text-align:center">
+          <div style="font-size:.72rem;color:#888;text-transform:uppercase;letter-spacing:.5px">Restantes</div>
+          <div style="font-family:'Syne',sans-serif;font-weight:800;font-size:1.5rem;color:#1a9e5c">
+            {{ assinante.fichas_restantes }}
+          </div>
+        </div>
+        <div style="background:#f8f8f8;border-radius:8px;padding:12px;text-align:center">
+          <div style="font-size:.72rem;color:#888;text-transform:uppercase;letter-spacing:.5px">Total geradas</div>
+          <div style="font-family:'Syne',sans-serif;font-weight:800;font-size:1.5rem;color:#1a1a1a">
+            {{ assinante.total_fichas_geradas }}
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Ações de gestão -->
+    <div class="card" style="padding:20px">
+      <div style="font-family:'Syne',sans-serif;font-weight:700;margin-bottom:16px">Ações</div>
+
+      <form method="post" action="{% url 'toggle_status' assinante.pk %}"
+            onsubmit="return confirm('Confirma a mudança de status?')">
+        {% csrf_token %}
+        <div style="display:flex;flex-direction:column;gap:8px">
+
+          {% if assinante.status != 'ativo' %}
+          <button type="submit" name="status" value="ativo"
+                  class="btn btn-primary" style="justify-content:center">
+            ✓ Ativar assinante
+          </button>
+          {% endif %}
+
+          {% if assinante.status != 'bloqueado' %}
+          <button type="submit" name="status" value="bloqueado"
+                  class="btn" style="background:#ffe0e0;color:#cc0000;border:1px solid #ffbcbc;justify-content:center">
+            ⊘ Bloquear acesso
+          </button>
+          {% endif %}
+
+          {% if assinante.status != 'inadimplente' %}
+          <button type="submit" name="status" value="inadimplente"
+                  class="btn" style="background:#fff3cd;color:#856404;border:1px solid #ffd66b;justify-content:center">
+            ⚠ Marcar inadimplente
+          </button>
+          {% endif %}
+
+          {% if assinante.status != 'cancelado' %}
+          <button type="submit" name="status" value="cancelado"
+                  class="btn btn-ghost" style="justify-content:center">
+            ✕ Cancelar assinatura
+          </button>
+          {% endif %}
+        </div>
+      </form>
+    </div>
+
+  </div>
+</div>
+
+<!-- Fichas do assinante -->
+<div class="card">
+  <div class="card-header">
+    <span class="card-title">▤ Fichas geradas por {{ assinante.nome }}</span>
+    <span style="font-size:.82rem;color:#888">{{ fichas.count }} ficha(s) no total</span>
+  </div>
+  <div class="card-body">
+    {% if fichas %}
+    <table>
+      <thead>
+        <tr>
+          <th>Nome do prato</th>
+          <th>Tipo</th>
+          <th>Código</th>
+          <th>Custo total</th>
+          <th>Custo/porção</th>
+          <th>Porções</th>
+          <th>Data</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for f in fichas %}
+        <tr>
+          <td><strong>{{ f.nome_prato }}</strong></td>
+          <td>
+            {% if f.tipo == 'tecnica' %}
+              <span class="badge badge-info">XLSX</span>
+            {% elif f.tipo == 'operacional' %}
+              <span class="badge badge-ativo">PDF</span>
+            {% else %}
+              <span class="badge badge-inadimplente">Custo rápido</span>
+            {% endif %}
+          </td>
+          <td style="font-size:.82rem;color:#888">{{ f.codigo|default:"—" }}</td>
+          <td>{% if f.custo_total %}R$ {{ f.custo_total }}{% else %}—{% endif %}</td>
+          <td>{% if f.custo_porcao %}R$ {{ f.custo_porcao }}{% else %}—{% endif %}</td>
+          <td>{{ f.num_porcoes|default:"—" }}</td>
+          <td style="font-size:.80rem;color:#888">{{ f.criada_em|date:"d/m/Y H:i" }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <div class="empty-state">
+      <div class="empty-icon">▤</div>
+      <p>Este assinante ainda não gerou nenhuma ficha.</p>
+    </div>
+    {% endif %}
+  </div>
+</div>
+
+{% endblock %}

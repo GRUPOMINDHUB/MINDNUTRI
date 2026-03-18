@@ -1,0 +1,66 @@
+{% extends 'painel/base.html' %}
+{% block title %}Notificações — Mindnutri{% endblock %}
+{% block page_title %}Notificações{% endblock %}
+
+{% block content %}
+
+{% if notif_nao_lidas > 0 %}
+<div style="display:flex;justify-content:flex-end;margin-bottom:16px">
+  <form method="post">
+    {% csrf_token %}
+    <button type="submit" name="marcar_todas" value="1" class="btn btn-ghost btn-sm">
+      ✓ Marcar todas como lidas ({{ notif_nao_lidas }})
+    </button>
+  </form>
+</div>
+{% endif %}
+
+<div class="card">
+  <div class="card-body">
+    {% if todas_notificacoes %}
+      {% for n in todas_notificacoes %}
+      <div class="notif-item {% if not n.lida %}nao-lida{% endif %}">
+        <div class="notif-icon {{ n.nivel }}">
+          {% if n.nivel == 'critico' %}🔴{% elif n.nivel == 'aviso' %}🟡{% else %}🔵{% endif %}
+        </div>
+        <div class="notif-text" style="flex:1">
+          <div class="titulo">
+            {{ n.titulo }}
+            {% if not n.lida %}
+            <span class="badge badge-critico" style="margin-left:6px;font-size:.65rem">NOVO</span>
+            {% endif %}
+          </div>
+          <div class="msg">{{ n.mensagem }}</div>
+          {% if n.assinante %}
+          <div style="margin-top:4px">
+            <a href="{% url 'assinante_detalhe' n.assinante.pk %}"
+               style="font-size:.78rem;color:#cc0000;text-decoration:none">
+              → Ver {{ n.assinante.nome }}
+            </a>
+          </div>
+          {% endif %}
+          <div class="notif-time">{{ n.criada_em|date:"d/m/Y H:i" }} — {{ n.criada_em|timesince }} atrás</div>
+        </div>
+        {% if not n.lida %}
+        <div class="notif-actions">
+          <form method="post">
+            {% csrf_token %}
+            <button type="submit" name="marcar_lida" value="{{ n.pk }}"
+                    class="btn btn-ghost btn-sm">✓ Lida</button>
+          </form>
+        </div>
+        {% else %}
+        <div style="font-size:.72rem;color:#bbb;padding:4px 8px">Lida</div>
+        {% endif %}
+      </div>
+      {% endfor %}
+    {% else %}
+    <div class="empty-state" style="padding:60px">
+      <div class="empty-icon">🔔</div>
+      <p>Sem notificações ainda.</p>
+    </div>
+    {% endif %}
+  </div>
+</div>
+
+{% endblock %}
