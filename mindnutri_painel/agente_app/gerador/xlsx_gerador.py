@@ -21,6 +21,63 @@ COR_CUSTO_BG    = "FFF3CD"
 COR_BORDA       = "CCCCCC"
 
 
+# ── Conjuntos de unidades que precisam ser normalizadas ──────────
+_UNIDADES_GRAMAS = {"g", "grama", "gramas", "gr"}
+_UNIDADES_ML     = {"ml", "mililitro", "mililitros"}
+
+
+def _safe_float(val, default: float = 0.0) -> float:
+    """Converte val para float com segurança, retornando default em caso de lixo."""
+    try:
+        return float(val)
+    except (TypeError, ValueError):
+        return default
+
+
+def _normalizar_ingrediente(ing: dict) -> dict:
+    """
+    Sanitiza um ingrediente vindo do LLM antes de injetar no Excel.
+
+    Garante:
+    - Pesos em kg (converte g→kg) e volumes em L (converte ml→L).
+    - peso_bruto = peso_liquido * fc quando vier nulo ou zerado.
+    - Todos os valores numéricos como float (nunca quebra o Excel).
+    """
+    ing = dict(ing)  # cópia — nunca muta o dict original
+
+    unidade = str(ing.get("unidade", "kg")).strip().lower()
+    pl  = _safe_float(ing.get("peso_liquido", 0))
+    pb  = _safe_float(ing.get("peso_bruto",   0))
+    fc  = _safe_float(ing.get("fc",  1.0)) or 1.0  # evita divisão por zero
+    ic  = _safe_float(ing.get("ic",  1.0)) or 1.0
+    cu  = _safe_float(ing.get("custo_unit", 0))
+
+    # 1. Converter gramas → kg
+    if unidade in _UNIDADES_GRAMAS:
+        pl      /= 1000
+        pb      /= 1000
+        unidade  = "kg"
+    # 2. Converter ml → L
+    elif unidade in _UNIDADES_ML:
+        pl      /= 1000
+        pb      /= 1000
+        unidade  = "L"
+
+    # 3. Calcular peso_bruto com FC quando vier zerado/nulo
+    if pb == 0.0 and pl > 0.0:
+        pb = pl * fc
+
+    ing.update(
+        unidade=unidade,
+        peso_liquido=pl,
+        peso_bruto=pb,
+        fc=fc,
+        ic=ic,
+        custo_unit=cu,
+    )
+    return ing
+
+
 def _borda():
     s = Side(style="thin", color=COR_BORDA)
     return Border(left=s, right=s, top=s, bottom=s)
@@ -87,16 +144,25 @@ def gerar_ficha_xlsx(dados: dict, caminho_saida: str) -> str:
     peso_porcao = dados.get("peso_porcao_kg", 0.1)
     estabelecimento = dados.get("estabelecimento", "")
 
+    # Lógica de Rendimento: Quente (Real Pós-Cocção) vs Frio (Soma Crua)
+    rendimento_porcoes = dados.get("rendimento_porcoes")
+    if rendimento_porcoes:
+        val_porcoes = rendimento_porcoes
+        val_rend_total = "=B7*E5"  # Multiplica Porções informadas * Peso da porção
+    else:
+        val_porcoes = '=IFERROR(B5/E5,"-")'
+        val_rend_total = "=SUM(G11:G42)"  # Fallback: Soma dos ingredientes crus
+
     campos = [
         ("A3", "Estabelecimento:", "B3", "C", estabelecimento, None),
         ("D3", "Código:",          "E3", "I", dados.get("codigo", ""), None),
         ("A4", "Nome da preparação:", "B4", "C", dados.get("nome_prato", ""), None),
         ("D4", "Classificação:",   "E4", "I", dados.get("classificacao", ""), None),
-        ("A5", "Rendimento total (kg):", "B5", "C", "=SUM(G11:G42)", "#,##0.000"),
+        ("A5", "Rendimento total (kg):", "B5", "C", val_rend_total, "#,##0.000"),
         ("D5", "Peso por porção (kg):", "E5", "I", peso_porcao, "#,##0.000"),
         ("A6", "Custo total:",     "B6", "C", "=SUM(I11:I42)", "R$ #,##0.00"),
         ("D6", "Custo por porção:","E6", "I", '=IFERROR(B6/B7,"-")', "R$ #,##0.00"),
-        ("A7", "Nº de porções:",   "B7", "C", '=IFERROR(B5/E5,"-")', "#,##0.0"),
+        ("A7", "Nº de porções:",   "B7", "C", val_porcoes, "#,##0.0"),
         ("D7", "Data:",            "E7", "I", "", None),
     ]
 
@@ -147,7 +213,7 @@ def gerar_ficha_xlsx(dados: dict, caminho_saida: str) -> str:
 
     # Ingredientes
     ingredientes = dados.get("ingredientes", [])
-    for idx, ing in enumerate(ingredientes):
+    for idx, ing in enumerate(_normalizar_ingrediente(i) for i in ingredientes):
         row = 11 + idx
         ws.row_dimensions[row].height = 18
         bg = COR_ALT1 if idx % 2 == 0 else COR_ALT2

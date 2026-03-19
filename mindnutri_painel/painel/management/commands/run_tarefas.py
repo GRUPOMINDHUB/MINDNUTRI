@@ -5,7 +5,7 @@ from assinaturas.servico_assinaturas import verificar_vencimentos as _v
 from assinaturas.servico_assinaturas import verificar_limites_fichas as _f
 from django.utils import timezone
 from datetime import date
-from utils.banco import conn
+
 
 def resetar_fichas_mensais():
     print(f"[{datetime.now():%H:%M:%S}] Resetando fichas mensais...")

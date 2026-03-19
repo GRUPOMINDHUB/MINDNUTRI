@@ -4,7 +4,7 @@ Centraliza toda lógica de ciclo de vida:
   criar → pagar → ativar → usar → renovar → bloquear → reativar → cancelar
 """
 from datetime import date, timedelta
-from asaas_client import asaas
+from assinaturas.asaas_client import asaas
 from utils import banco, whatsapp
 from django.conf import settings as config
 

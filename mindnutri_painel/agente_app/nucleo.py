@@ -315,10 +315,11 @@ CONTEXTO DO CLIENTE:
                     "parameters": {
                         "type": "object",
                         "properties": {
-                            "nome_prato":     {"type": "string"},
-                            "classificacao":  {"type": "string"},
-                            "codigo":         {"type": "string"},
-                            "peso_porcao_kg": {"type": "number"},
+                            "nome_prato":        {"type": "string"},
+                            "classificacao":     {"type": "string"},
+                            "codigo":            {"type": "string"},
+                            "peso_porcao_kg":    {"type": "number"},
+                            "rendimento_porcoes": {"type": "number"},
                             "ingredientes": {
                                 "type": "array",
                                 "items": {
@@ -349,9 +350,10 @@ CONTEXTO DO CLIENTE:
                     "parameters": {
                         "type": "object",
                         "properties": {
-                            "nome_prato":      {"type": "string"},
-                            "classificacao":   {"type": "string"},
-                            "codigo":          {"type": "string"},
+                            "nome_prato":        {"type": "string"},
+                            "classificacao":     {"type": "string"},
+                            "codigo":            {"type": "string"},
+                            "rendimento_porcoes": {"type": "number"},
                             "ingredientes_op": {
                                 "type": "array",
                                 "items": {
