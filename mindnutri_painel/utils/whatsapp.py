@@ -29,7 +29,7 @@ def enviar_texto(telefone: str, texto: str) -> dict:
     """Envia mensagem de texto simples."""
     return _post("sendText", {
         "number": telefone,
-        "textMessage": {"text": texto},
+        "text": texto,
     })
 
 
@@ -50,28 +50,36 @@ def enviar_arquivo(telefone: str, caminho: str, caption: str = "") -> dict:
 
     return _post("sendMedia", {
         "number": telefone,
-        "mediaMessage": {
-            "mediatype": "document",
-            "mimetype": mimetype,
-            "media": b64,
-            "fileName": nome_arquivo,
-            "caption": caption,
-        }
+        "mediatype": "document",
+        "mimetype": mimetype,
+        "media": b64,
+        "fileName": nome_arquivo,
+        "caption": caption,
     })
 
 
 def enviar_imagem(telefone: str, caminho: str, caption: str = "") -> dict:
     """Envia imagem."""
+    ext = os.path.splitext(caminho)[1].lower()
+    mime_map = {
+        ".png": "image/png",
+        ".jpg": "image/jpeg",
+        ".jpeg": "image/jpeg",
+        ".webp": "image/webp",
+    }
+    mimetype = mime_map.get(ext, "image/jpeg")
+    nome_arquivo = os.path.basename(caminho)
+
     with open(caminho, "rb") as f:
         b64 = base64.b64encode(f.read()).decode()
+
     return _post("sendMedia", {
         "number": telefone,
-        "mediaMessage": {
-            "mediatype": "image",
-            "mimetype": "image/jpeg",
-            "media": b64,
-            "caption": caption,
-        }
+        "mediatype": "image",
+        "mimetype": mimetype,
+        "media": b64,
+        "fileName": nome_arquivo,
+        "caption": caption,
     })
 
 

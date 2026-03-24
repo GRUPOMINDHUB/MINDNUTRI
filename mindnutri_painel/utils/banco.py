@@ -16,6 +16,7 @@ def get_assinante(telefone: str) -> dict | None:
             "nicho": a.nicho,
             "cidade": a.cidade,
             "instagram": a.instagram,
+            "cpf": a.cpf,
             "funcionarios": a.funcionarios,
             "faturamento_estimado": a.faturamento_estimado,
             "status": a.status,

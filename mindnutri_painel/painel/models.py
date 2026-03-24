@@ -12,6 +12,7 @@ class Assinante(models.Model):
         ('outro', 'Outro'),
     ]
     STATUS_CHOICES = [
+        ('pendente', 'Pendente'),
         ('ativo', 'Ativo'),
         ('bloqueado', 'Bloqueado'),
         ('inadimplente', 'Inadimplente'),
@@ -19,17 +20,18 @@ class Assinante(models.Model):
     ]
 
     # Dados pessoais
-    nome              = models.CharField(max_length=200)
+    nome              = models.CharField(max_length=200, default="")
     telefone          = models.CharField(max_length=30, unique=True)
-    estabelecimento   = models.CharField(max_length=200)
+    estabelecimento   = models.CharField(max_length=200, default="")
     nicho             = models.CharField(max_length=50, choices=NICHO_CHOICES, default='outro')
     cidade            = models.CharField(max_length=100, blank=True)
     instagram         = models.CharField(max_length=100, blank=True)
+    cpf               = models.CharField(max_length=14, blank=True)
     funcionarios      = models.PositiveIntegerField(default=1)
     faturamento_estimado = models.CharField(max_length=50, blank=True)
 
     # Assinatura
-    status            = models.CharField(max_length=20, choices=STATUS_CHOICES, default='ativo')
+    status            = models.CharField(max_length=20, choices=STATUS_CHOICES, default='pendente')
     data_inicio       = models.DateField(default=timezone.localdate)
     proxima_cobranca  = models.DateField(null=True, blank=True)
     asaas_id          = models.CharField(max_length=100, blank=True)

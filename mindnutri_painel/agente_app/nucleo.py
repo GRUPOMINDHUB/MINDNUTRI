@@ -4,8 +4,18 @@ import os
 import tempfile
 from datetime import datetime
 from pathlib import Path
+import logging
+import traceback
+
+# Configuração de log em arquivo
+logging.basicConfig(
+    filename='agente_debug.log',
+    level=logging.INFO,
+    format='%(asctime)s [%(levelname)s] %(message)s'
+)
 
 import openai
+import requests
 
 from django.conf import settings as config
 from agente_app.prompt import SYSTEM_PROMPT
@@ -14,8 +24,8 @@ from agente_app.gerador import xlsx_gerador, pdf_gerador
 
 _gpt = openai.OpenAI(api_key=config.OPENAI_API_KEY)
 
-# Pasta de assets (logo, exemplos)
-ASSETS_DIR = Path(__file__).parent.parent / "assets"
+# Pasta de assets (logo, exemplos) — relativa à raiz do projeto Django (mindnutri_painel/)
+ASSETS_DIR   = Path(__file__).parent.parent / "assets"
 EXEMPLOS_DIR = Path(__file__).parent.parent / "exemplos"
 
 # Contador de falhas de entendimento por telefone
@@ -30,14 +40,29 @@ def processar_mensagem(telefone: str, tipo: str, texto: str = None,
     Ponto de entrada único para todas as mensagens recebidas.
     Chamado pelo webhook do Django.
     """
-    # Garante que assinante existe no banco
+    # ── LOG DE ENTRADA ──────────────────────────────────────────
+    print(f"[Recebido] Mensagem de {telefone}: {texto}")
+    logging.info(f"[Recebido] telefone={telefone} tipo={tipo} texto={texto}")
+
+    # Garante que assinante existe no banco (qualquer numero, sem restricao)
     if not banco.get_assinante(telefone):
+        print(f"[Novo] Numero {telefone} nao encontrado no banco. Criando assinante...")
+        logging.info(f"[Novo] Criando assinante para {telefone}")
         banco.criar_assinante(telefone)
 
     assinante = banco.get_assinante(telefone)
     estado    = banco.get_estado(telefone)
 
-    # ── Processar mídia ──────────────────────────────────────────
+    # Forca estado inicial para assinantes novos sem estado definido
+    if assinante["status"] == "pendente" and (not estado["estado"] or estado["estado"] == "inicio"):
+        banco.set_estado(telefone, "boas_vindas_inicio", {})
+        estado = banco.get_estado(telefone)
+
+    # ── LOG DE DEBUG (TAREFA 3) ─────────────────────────────────
+    print(f"[DEBUG] Telefone: {telefone} | Estado Atual: {estado['estado']}")
+    logging.info(f"[DEBUG] Telefone: {telefone} | Estado Atual: {estado['estado']} | Status: {assinante['status']}")
+
+    # ── Processar midia ──────────────────────────────────────────
     if tipo == "audio" and midia_bytes:
         texto_transcrito = midia.transcrever_audio(midia_bytes)
         if not texto_transcrito:
@@ -50,18 +75,46 @@ def processar_mensagem(telefone: str, tipo: str, texto: str = None,
         texto = f"[IMAGEM ENVIADA]\nIngredientes identificados na imagem:\n{ingredientes_extraidos}"
 
     elif tipo == "documento" and midia_bytes:
-        texto = "[DOCUMENTO ENVIADO] O cliente enviou um documento para análise."
+        texto = "[DOCUMENTO ENVIADO] O cliente enviou um documento para analise."
 
     if not texto:
-        whatsapp.enviar_texto(telefone, "N\u00e3o consegui entender sua mensagem. Pode repetir por texto?")
+        whatsapp.enviar_texto(telefone, "Nao consegui entender sua mensagem. Pode repetir por texto?")
         return
 
-    # ── Verificar fluxo de onboarding ────────────────────────────
+    # ── Fluxo de onboarding (PRIORIDADE MAXIMA para status 'pendente') ──
     if assinante["status"] == "pendente":
+        print(f"[Fluxo] {telefone} pendente -> _fluxo_boas_vindas (estado={estado['estado']})")
         _fluxo_boas_vindas(telefone, texto, estado, assinante)
         return
 
     if assinante["status"] in ("bloqueado", "inadimplente"):
+        whatsapp.enviar_texto(telefone,
+            "âš ï¸ Seu acesso estÃ¡ suspenso no momento.\n\n"
+            "Para regularizar sua assinatura, acesse o link de pagamento ou entre em contato com o suporte Mindhub.")
+        return
+
+        if metodo == "cartao":
+            whatsapp.enviar_texto(
+                telefone,
+                "Perfeito! Aqui esta seu link de pagamento em *cartao de credito*.\n\n"
+                f"🔗 {link}\n\n"
+                "Esse fluxo ativa a *assinatura mensal automatica* do Mindnutri. "
+                "Assim que o pagamento for aprovado, seu acesso sera liberado automaticamente.",
+            )
+        else:
+            mensagem_pix = (
+                "Perfeito! Aqui esta seu link de pagamento em *Pix*.\n\n"
+                f"🔗 {link}\n\n"
+            )
+            if codigo_pix:
+                mensagem_pix += f"Codigo Pix copia e cola:\n{codigo_pix}\n\n"
+            mensagem_pix += (
+                "Assim que o pagamento for confirmado, seu acesso sera liberado automaticamente. "
+                "Nas renovacoes via Pix, o pagamento segue manual a cada ciclo."
+            )
+            whatsapp.enviar_texto(telefone, mensagem_pix)
+        return
+
         whatsapp.enviar_texto(telefone,
             "⚠️ Seu acesso está suspenso no momento.\n\n"
             "Para regularizar sua assinatura, acesse o link de pagamento ou entre em contato com o suporte Mindhub.")
@@ -75,7 +128,9 @@ def processar_mensagem(telefone: str, tipo: str, texto: str = None,
     # ── Verificar comandos especiais ────────────────────────────
     texto_lower = texto.lower().strip()
 
-    if texto_lower in ("cancelar", "recomeçar", "reiniciar", "menu", "/menu"):
+    comandos_reset = ["cancelar", "recomeçar", "reiniciar", "menu", "/menu"]
+
+    if texto_lower in comandos_reset:
         banco.resetar_estado(telefone)
         _enviar_menu_principal(telefone, assinante)
         return
@@ -108,10 +163,26 @@ def processar_mensagem(telefone: str, tipo: str, texto: str = None,
 
     if estado_atual == "aguardando_renovacao":
         if "sim" in texto_lower:
-            _enviar_link_renovacao(telefone, assinante)
+            _pedir_metodo_pagamento(
+                telefone,
+                "escolha_pagamento_renovacao",
+                "Como voce prefere fazer a renovacao?",
+            )
         else:
             banco.resetar_estado(telefone)
             _enviar_menu_principal(telefone, assinante)
+        return
+
+    if estado_atual == "escolha_pagamento_renovacao":
+        metodo = _interpretar_metodo_pagamento(texto)
+        if not metodo:
+            _pedir_metodo_pagamento(
+                telefone,
+                "escolha_pagamento_renovacao",
+                "Nao entendi o metodo de pagamento.",
+            )
+            return
+        _enviar_link_renovacao(telefone, assinante, metodo)
         return
 
     if estado_atual.startswith("criando_ficha"):
@@ -129,61 +200,153 @@ def processar_mensagem(telefone: str, tipo: str, texto: str = None,
 # ── FLUXO DE BOAS-VINDAS (primeiro contato / cadastro) ──────────
 
 def _fluxo_boas_vindas(telefone: str, texto: str, estado: dict, assinante: dict):
-    """Fluxo de primeiro contato e demonstração antes de assinar."""
+    """
+    Fluxo de primeiro contato: coleta dados pessoais e depois oferece demonstracao.
+    Sequencia: boas_vindas_inicio -> coletando_nome -> coletando_cpf
+               -> coletando_instagram -> demonstracao_inicio -> escolha_nicho
+               -> pos_exemplo -> assinar -> aguardando_pagamento
+    """
     est = estado["estado"]
+    print(f"[Boas-vindas] {telefone}: estado='{est}', texto='{texto}'")
 
-    if est == "inicio":
-        banco.set_estado(telefone, "demonstracao_inicio", {})
-        resp = (
-            "Olá! 👋 Bem-vindo ao *Mindnutri*, o agente de IA especializado em fichas técnicas da Mindhub!\n\n"
-            "Sou capaz de criar fichas técnicas profissionais em Excel, fichas operacionais em PDF "
-            "e calcular custos de pratos — tudo aqui pelo WhatsApp. 📋\n\n"
-            "Quer ver um exemplo do que consigo fazer antes de assinar?\n\n"
-            "Responda *SIM* para ver um exemplo grátis agora!"
-        )
-        whatsapp.enviar_texto(telefone, resp)
+    # ── 1. Saudacao e pedir o nome ──────────────────────────────
+    if est == "boas_vindas_inicio":
+        banco.set_estado(telefone, "coletando_nome", {})
+        whatsapp.enviar_texto(telefone,
+            "Ola! 👋 Bem-vindo ao *Mindnutri*, o agente de IA especializado "
+            "em fichas tecnicas da Mindhub!\n\n"
+            "Antes de comecarmos, preciso de algumas informacoes rapidas.\n\n"
+            "Qual e o seu *nome completo*?")
         return
 
+    # ── 2. Salvar nome e pedir CPF ──────────────────────────────
+    if est == "coletando_nome":
+        nome = texto.strip()
+        if len(nome) < 2:
+            whatsapp.enviar_texto(telefone,
+                "Por favor, digite seu nome completo (minimo 2 caracteres).")
+            return
+        banco.atualizar_assinante(telefone, nome=nome)
+        banco.set_estado(telefone, "coletando_cpf", {})
+        whatsapp.enviar_texto(telefone,
+            f"Prazer, *{nome}*! 😊\n\n"
+            "Agora preciso do seu *CPF* (apenas numeros, ex: 12345678900).\n"
+            "Ele e necessario para gerar o link de pagamento.")
+        return
+
+    # ── 3. Salvar CPF e pedir Instagram ─────────────────────────
+    if est == "coletando_cpf":
+        import re
+        cpf_limpo = re.sub(r'\D', '', texto.strip())
+        if len(cpf_limpo) != 11:
+            whatsapp.enviar_texto(telefone,
+                "CPF invalido. Por favor, digite os *11 digitos* do seu CPF (apenas numeros).\n"
+                "Exemplo: 12345678900")
+            return
+        banco.atualizar_assinante(telefone, cpf=cpf_limpo)
+        banco.set_estado(telefone, "coletando_instagram", {})
+        whatsapp.enviar_texto(telefone,
+            "Otimo! Agora me diz: qual e o *@ do Instagram* do seu negocio?\n\n"
+            "Exemplo: @minhahamburgeria\n\n"
+            "Se nao tiver, digite *NAO*.")
+        return
+
+    # ── 4. Salvar Instagram e oferecer demonstracao ─────────────
+    if est == "coletando_instagram":
+        ig = texto.strip()
+        if ig.lower() not in ("nao", "n", "nenhum", "nao tenho", "nao tem"):
+            # Garante que tem @
+            if not ig.startswith("@"):
+                ig = "@" + ig
+            banco.atualizar_assinante(telefone, instagram=ig)
+        banco.set_estado(telefone, "demonstracao_inicio", {})
+        whatsapp.enviar_texto(telefone,
+            "Perfeito, tudo anotado! ✅\n\n"
+            "Agora vou te mostrar o que o Mindnutri e capaz de fazer. "
+            "Posso criar fichas tecnicas profissionais em Excel, fichas operacionais "
+            "em PDF e calcular custos de pratos -- tudo aqui pelo WhatsApp. 📋\n\n"
+            "Quer ver um *exemplo gratis* antes de assinar?\n\n"
+            "Responda *SIM* para ver um exemplo agora!")
+        return
+
+    # ── 5. Decidir se quer ver exemplo ──────────────────────────
     if est == "demonstracao_inicio":
-        if "sim" in texto.lower() or "quero" in texto.lower():
+        if any(w in texto.lower() for w in ("sim", "quero", "ver", "exemplo", "ok")):
             banco.set_estado(telefone, "demonstracao_escolha_nicho", {})
             whatsapp.enviar_texto(telefone,
-                "Ótimo! Escolha um nicho para ver o exemplo:\n\n"
-                "1️⃣ Hambúrguer\n"
-                "2️⃣ Pizza\n"
-                "3️⃣ Sobremesa\n\n"
-                "Responda com o número ou nome do nicho.")
+                "Otimo! Escolha um nicho para ver o exemplo:\n\n"
+                "1 Hamburguer\n"
+                "2 Pizza\n"
+                "3 Sobremesa\n\n"
+                "Responda com o numero ou nome do nicho.")
         else:
+            # Pula direto para a oferta de assinatura
+            banco.set_estado(telefone, "demonstracao_assinar", {})
             whatsapp.enviar_texto(telefone,
-                "Tudo bem! Quando quiser conhecer o Mindnutri, é só chamar. 😊")
+                "Sem problema! Quando quiser ver um exemplo, e so pedir.\n\n"
+                f"*Plano Mensal: R$ {config.PLANO_VALOR:.2f}/mes*\n"
+                "30 fichas por mes | XLSX + PDF profissionais\n\n"
+                "Responda *ASSINAR* para receber o link de pagamento. 😊")
         return
 
+    # ── 6. Escolher nicho e enviar exemplo ──────────────────────
     if est == "demonstracao_escolha_nicho":
         _enviar_exemplo_por_nicho(telefone, texto)
         banco.set_estado(telefone, "demonstracao_pos_exemplo", {})
         return
 
+    # ── 7. Pos-exemplo: oferecer plano ──────────────────────────
     if est == "demonstracao_pos_exemplo":
         banco.set_estado(telefone, "demonstracao_assinar", {})
         whatsapp.enviar_texto(telefone,
-            "Gostou? Com o Mindnutri você cria fichas assim para todos os seus pratos, "
+            "Gostou? Com o Mindnutri voce cria fichas assim para todos os seus pratos, "
             "com seus ingredientes, seus custos e sua marca. 🚀\n\n"
-            f"*Plano Mensal: R$ {config.PLANO_VALOR:.2f}/mês*\n"
-            "✅ 30 fichas por mês\n"
-            "✅ XLSX + PDF profissionais\n"
-            "✅ Cálculo de custos instantâneo\n"
-            "✅ Base de ingredientes sempre atualizada\n\n"
+            f"*Plano Mensal: R$ {config.PLANO_VALOR:.2f}/mes*\n"
+            "30 fichas por mes\n"
+            "XLSX + PDF profissionais\n"
+            "Calculo de custos instantaneo\n"
+            "Base de ingredientes sempre atualizada\n\n"
             "Quer assinar agora?\n\n"
             "Responda *ASSINAR* para receber o link de pagamento.")
         return
 
+    # ── 8. Assinar ──────────────────────────────────────────────
     if est == "demonstracao_assinar":
-        if "assinar" in texto.lower() or "sim" in texto.lower() or "quero" in texto.lower():
-            _iniciar_assinatura(telefone)
+        if any(w in texto.lower() for w in ("assinar", "sim", "quero", "pagar")):
+            _pedir_metodo_pagamento(
+                telefone,
+                "escolha_pagamento_assinatura",
+                "Perfeito! Como voce prefere pagar a assinatura?",
+            )
         else:
             whatsapp.enviar_texto(telefone,
-                "Sem problema! Quando quiser assinar, é só responder *ASSINAR*. 😊")
+                "Sem problema! Quando quiser assinar, e so responder *ASSINAR*. 😊")
         return
+
+    # ── 9. Aguardando pagamento ─────────────────────────────────
+    if est == "escolha_pagamento_assinatura":
+        metodo = _interpretar_metodo_pagamento(texto)
+        if not metodo:
+            _pedir_metodo_pagamento(
+                telefone,
+                "escolha_pagamento_assinatura",
+                "Nao entendi o metodo de pagamento.",
+            )
+            return
+        _iniciar_assinatura(telefone, metodo)
+        return
+
+    if est == "aguardando_pagamento":
+        whatsapp.enviar_texto(telefone,
+            "Ainda estamos aguardando a confirmacao do seu pagamento.\n\n"
+            "Assim que compensar, seu acesso e liberado automaticamente! 💙\n\n"
+            "Se ja pagou e ainda nao foi liberado, aguarde alguns minutos.")
+        return
+
+    # ── Fallback: estado desconhecido --> reseta ────────────────
+    print(f"[Boas-vindas] Estado desconhecido '{est}' para {telefone}. Resetando...")
+    banco.set_estado(telefone, "boas_vindas_inicio", {})
+    _fluxo_boas_vindas(telefone, texto, banco.get_estado(telefone), assinante)
 
 
 def _enviar_exemplo_por_nicho(telefone: str, texto: str):
@@ -206,31 +369,155 @@ def _enviar_exemplo_por_nicho(telefone: str, texto: str):
     xlsx_path = EXEMPLOS_DIR / f"exemplo_{nicho}.xlsx"
     pdf_path  = EXEMPLOS_DIR / f"exemplo_{nicho}.pdf"
 
+    print(f"[Exemplos] EXEMPLOS_DIR resolvido para: {EXEMPLOS_DIR.resolve()}")
+    print(f"[Exemplos] xlsx_path={xlsx_path} existe={xlsx_path.exists()}")
+    print(f"[Exemplos] pdf_path={pdf_path} existe={pdf_path.exists()}")
+
+    enviou_algo = False
+
     if xlsx_path.exists():
-        whatsapp.enviar_arquivo(str(xlsx_path),
+        whatsapp.enviar_arquivo(telefone, str(xlsx_path),
             caption=f"Ficha Técnica — {nicho.capitalize()} (XLSX)")
+        enviou_algo = True
+    else:
+        print(f"ERRO: Arquivo não encontrado em {xlsx_path}")
+        logging.error(f"Arquivo de exemplo não encontrado: {xlsx_path}")
 
     if pdf_path.exists():
-        whatsapp.enviar_arquivo(str(pdf_path),
+        whatsapp.enviar_arquivo(telefone, str(pdf_path),
             caption=f"Ficha Operacional — {nicho.capitalize()} (PDF)")
+        enviou_algo = True
+    else:
+        print(f"ERRO: Arquivo não encontrado em {pdf_path}")
+        logging.error(f"Arquivo de exemplo não encontrado: {pdf_path}")
+
+    if not enviou_algo:
+        whatsapp.enviar_texto(telefone,
+            "Opa, tive um problema técnico ao buscar esse exemplo, "
+            "mas você pode assinar para testar com seus dados! 🚀\n\n"
+            "Responda *ASSINAR* para começar.")
 
 
-def _iniciar_assinatura(telefone: str):
-    """Gera link de pagamento no Asaas e envia para o cliente."""
+def _interpretar_metodo_pagamento(texto: str) -> str | None:
+    texto_lower = texto.lower().strip()
+    if texto_lower in ("1", "cartao", "cartão", "credito", "crédito", "cartao de credito", "cartão de crédito"):
+        return "cartao"
+    if texto_lower in ("2", "pix"):
+        return "pix"
+    return None
+
+
+def _pedir_metodo_pagamento(telefone: str, estado_destino: str, abertura: str):
+    banco.set_estado(telefone, estado_destino, {})
+    whatsapp.enviar_texto(
+        telefone,
+        f"{abertura}\n\n"
+        "1 Cartao de credito\n"
+        "Assinatura recorrente automatica, sem boleto.\n\n"
+        "2 Pix\n"
+        "Pagamento do ciclo atual via Pix, sem boleto.\n\n"
+        "Responda com *1*, *2*, *CARTAO* ou *PIX*.",
+    )
+
+
+def _iniciar_assinatura(telefone: str, metodo: str):
+    """Gera o link conforme o metodo escolhido e envia ao cliente."""
+    print(f"[Asaas] Iniciando criação de assinatura para {telefone}")
+    logging.info(f"[Asaas] Iniciando assinatura para {telefone} via {metodo}")
     try:
-        from utils.asaas import criar_cobranca_assinatura
-        link = criar_cobranca_assinatura(telefone)
+        if metodo == "cartao":
+            from utils.asaas import criar_link_assinatura_cartao
+            pagamento = criar_link_assinatura_cartao(telefone)
+            link = pagamento.get("url")
+        else:
+            from utils.asaas import criar_cobranca_pix
+            pagamento = criar_cobranca_pix(
+                telefone,
+                config.PLANO_VALOR,
+                "Mindhub Mindnutri - Assinatura Mensal via Pix",
+            )
+            link = pagamento.get("invoice_url")
+            codigo_pix = pagamento.get("pix_copy_paste", "")
+
+        if not link:
+            raise ValueError("Link de pagamento retornado vazio pelo Asaas")
+
+        dados_estado = {"metodo_pagamento": metodo}
+        if metodo == "cartao":
+            dados_estado["payment_link_id"] = pagamento.get("payment_link_id", "")
+            whatsapp.enviar_texto(
+                telefone,
+                "Perfeito! Aqui esta seu link de pagamento em *cartao de credito*.\n\n"
+                f"🔗 {link}\n\n"
+                "Esse fluxo ativa a *assinatura mensal automatica* do Mindnutri. "
+                "Assim que o pagamento for aprovado, seu acesso sera liberado automaticamente.",
+            )
+        else:
+            dados_estado["payment_id"] = pagamento.get("payment_id", "")
+            mensagem_pix = (
+                "Perfeito! Aqui esta seu link de pagamento em *Pix*.\n\n"
+                f"🔗 {link}\n\n"
+            )
+            if codigo_pix:
+                mensagem_pix += f"Codigo Pix copia e cola:\n{codigo_pix}\n\n"
+            mensagem_pix += (
+                "Assim que o pagamento for confirmado, seu acesso sera liberado automaticamente. "
+                "Nas renovacoes via Pix, o pagamento segue manual a cada ciclo."
+            )
+            whatsapp.enviar_texto(telefone, mensagem_pix)
+
+        banco.set_estado(telefone, "aguardando_pagamento", dados_estado)
+        return
+
         whatsapp.enviar_texto(telefone,
             f"Ótimo! Aqui está seu link de pagamento:\n\n"
             f"🔗 {link}\n\n"
             f"Após o pagamento ser confirmado, seu acesso é ativado automaticamente "
             f"e vamos começar a criar suas fichas! 🎉")
+
+        dados_estado = {"metodo_pagamento": metodo}
+        if metodo == "cartao":
+            dados_estado["payment_link_id"] = pagamento.get("payment_link_id", "")
+        else:
+            dados_estado["payment_id"] = pagamento.get("payment_id", "")
+        banco.set_estado(telefone, "aguardando_pagamento", dados_estado)
+
     except Exception as e:
-        print(f"[Asaas] Erro ao criar cobrança: {e}")
+        # Log completo para o terminal e ficheiro
+        print(f"ERRO ASAAS DETALHADO: {str(e)}")
+        logging.error(f"ERRO ASAAS DETALHADO: {str(e)}")
+        if isinstance(e, requests.exceptions.HTTPError) and hasattr(e, 'response') and e.response is not None:
+            print(f"ERRO ASAAS RESPONSE BODY: {e.response.text}")
+            logging.error(f"ERRO ASAAS RESPONSE BODY: {e.response.text}")
+        logging.error(traceback.format_exc())
+
+        erro_body = e.response.text if isinstance(e, requests.exceptions.HTTPError) and hasattr(e, 'response') and e.response is not None else ""
+        if metodo == "pix" and "Pix" in erro_body:
+            whatsapp.enviar_texto(
+                telefone,
+                "O Pix ainda nao esta habilitado nesta conta do Asaas.\n\n"
+                "Enquanto isso, eu consigo te enviar o link em *cartao de credito* sem boleto. "
+                "Responda *CARTAO* para continuar.",
+            )
+            banco.set_estado(telefone, "escolha_pagamento_assinatura", {})
+            return
+
         whatsapp.enviar_texto(telefone,
-            "Vou te passar o link de pagamento em instantes. "
-            "Nossa equipe entrará em contato em breve! 😊")
-    banco.set_estado(telefone, "aguardando_pagamento", {})
+            "Desculpe, tive um problema técnico ao gerar seu link de pagamento. 😔\n\n"
+            "Por favor, entre em contato com o suporte da Mindhub para completar sua assinatura:\n"
+            f"📱 WhatsApp: {config.GESTOR_WHATSAPP}\n\n"
+            "Enquanto isso, responda *ASSINAR* para tentar novamente!")
+
+        # Alerta para o gestor
+        if config.GESTOR_WHATSAPP:
+            whatsapp.enviar_texto(config.GESTOR_WHATSAPP,
+                f"🚨 *Alerta Mindnutri — Asaas Falhou*\n\n"
+                f"Cliente {telefone} tentou assinar mas o Asaas retornou erro:\n"
+                f"{str(e)[:200]}\n\n"
+                f"Verifique a integração.")
+
+        # NÃO muda estado — mantém em demonstracao_assinar para retry
+        return
 
 
 # ── MENU PRINCIPAL ───────────────────────────────────────────────
@@ -401,7 +688,6 @@ CONTEXTO DO CLIENTE:
         ]
 
         # Configuração do modelo caso não tenha sido migrada
-        # (Presumimos que CLAUDE_MODEL virou OPENAI_MODEL ou iteramos)
         modelo_escolhido = getattr(config, 'OPENAI_MODEL', 'gpt-4o')
 
         resposta = _gpt.chat.completions.create(
@@ -459,7 +745,6 @@ CONTEXTO DO CLIENTE:
                         )
                     if texto_resposta:
                         whatsapp.enviar_texto(telefone, texto_resposta)
-                    # For salvar_ingredientes, replace the auto-msg if it was empty
                     if not texto_resposta:
                         banco.salvar_mensagem(telefone, "assistant", "[Ingredientes salvos na base do cliente]")
                 
@@ -473,6 +758,7 @@ CONTEXTO DO CLIENTE:
     except Exception as e:
         safe_msg = repr(e).encode('utf-8', 'ignore').decode('utf-8')
         print(f"[OpenAI] Erro: {safe_msg}")
+        logging.error(f"[OpenAI] Erro: {safe_msg}")
         _registrar_falha(telefone, assinante)
 
 
@@ -597,14 +883,44 @@ def _registrar_falha(telefone: str, assinante: dict):
             )
 
 
-def _enviar_link_renovacao(telefone: str, assinante: dict):
+def _enviar_link_renovacao(telefone: str, assinante: dict, metodo: str):
     try:
-        from utils.asaas import criar_cobranca_avulsa
-        link = criar_cobranca_avulsa(telefone, config.PLANO_VALOR,
-                                      "Renovação antecipada Mindnutri")
-        whatsapp.enviar_texto(telefone,
-            f"Aqui está seu link para renovação:\n\n🔗 {link}\n\n"
-            "Após o pagamento, suas fichas são renovadas automaticamente! ✅")
+        if metodo == "cartao":
+            from utils.asaas import criar_link_cartao_avulso
+
+            pagamento = criar_link_cartao_avulso(
+                telefone,
+                config.PLANO_VALOR,
+                "Mindhub Mindnutri - Renovacao antecipada",
+            )
+            link = pagamento.get("url", "")
+            banco.set_estado(
+                telefone,
+                "aguardando_pagamento",
+                {"payment_link_id": pagamento.get("payment_link_id", ""), "metodo_pagamento": metodo},
+            )
+        else:
+            from utils.asaas import criar_cobranca_pix
+
+            pagamento = criar_cobranca_pix(
+                telefone,
+                config.PLANO_VALOR,
+                "Mindhub Mindnutri - Renovacao via Pix",
+            )
+            link = pagamento.get("invoice_url", "")
+            banco.set_estado(
+                telefone,
+                "aguardando_pagamento",
+                {"payment_id": pagamento.get("payment_id", ""), "metodo_pagamento": metodo},
+            )
+
+        whatsapp.enviar_texto(
+            telefone,
+            f"Aqui esta seu link para renovacao via *{metodo}*:\n\n🔗 {link}\n\n"
+            "Apos o pagamento, suas fichas sao renovadas automaticamente.",
+        )
     except Exception:
-        whatsapp.enviar_texto(telefone,
-            "Em instantes nossa equipe te enviará o link de renovação. 😊")
+        whatsapp.enviar_texto(
+            telefone,
+            "Em instantes nossa equipe te enviara o link de renovacao.",
+        )

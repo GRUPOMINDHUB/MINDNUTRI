@@ -1,19 +1,47 @@
 services:
+  postgres:
+    image: postgres:15
+    environment:
+      - POSTGRES_DB=evolution
+      - POSTGRES_USER=evolution
+      - POSTGRES_PASSWORD=evolution_password
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    restart: unless-stopped
+
+  redis:
+    image: redis:latest
+    command: redis-server --appendonly yes
+    volumes:
+      - redis_data:/data
+    restart: unless-stopped
+
   evolution-api:
-    image: atendai/evolution-api:v1.8.2
+    image: evoapicloud/evolution-api:latest
+    depends_on:
+      - postgres
+      - redis
     ports:
       - "8080:8080"
     environment:
       - SERVER_URL=http://localhost:8080
-      - AUTHENTICATION_TYPE=apikey
       - AUTHENTICATION_API_KEY=Mindnutri1417!
       - AUTHENTICATION_EXPOSE_IN_FETCH_INSTANCES=true
-      - DATABASE_ENABLED=false
+      - DATABASE_ENABLED=true
+      - DATABASE_PROVIDER=postgresql
+      - DATABASE_CONNECTION_URI=postgresql://evolution:evolution_password@postgres:5432/evolution?schema=public
+      - DATABASE_SAVE_DATA_INSTANCE=true
+      - DATABASE_SAVE_DATA_NEW_MESSAGE=true
+      - CACHE_REDIS_ENABLED=true
+      - CACHE_REDIS_URI=redis://redis:6379
       - QRCODE_LIMIT=30
-      - DEL_INSTANCE=false
+      - NODE_OPTIONS=--network-family-autoselection-attempt-timeout=1000
+      - LANGUAGE=pt-BR
     volumes:
-      - evolution_data:/evolution/store
+      - evolution_data:/evolution/instances
     restart: unless-stopped
 
 volumes:
   evolution_data:
+  postgres_data:
+  redis_data:

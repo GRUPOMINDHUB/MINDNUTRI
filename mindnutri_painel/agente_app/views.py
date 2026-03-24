@@ -2,8 +2,18 @@
 Views Django do agente Mindnutri.
 Recebe webhooks da Evolution API e do Asaas.
 """
+import sys
 import json
 import threading
+import io
+
+# ── FIX CRITICO: Forca stdout/stderr para UTF-8 no Windows ─────
+# Sem isto, qualquer print() com emoji/acentos crasha threads silenciosamente
+if sys.stdout.encoding != 'utf-8':
+    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
+if sys.stderr.encoding != 'utf-8':
+    sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8', errors='replace')
+
 from django.http import JsonResponse
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_POST
@@ -16,6 +26,7 @@ from agente_app.nucleo import processar_mensagem
 def _processar_em_background(telefone, tipo, texto, midia_id, midia_bytes):
     """Processa a mensagem em thread separada para não bloquear o webhook."""
     try:
+        print(f"[Agente] Iniciando processamento para {telefone} (tipo: {tipo})")
         processar_mensagem(
             telefone=telefone,
             tipo=tipo,
@@ -23,6 +34,7 @@ def _processar_em_background(telefone, tipo, texto, midia_id, midia_bytes):
             midia_id=midia_id,
             midia_bytes=midia_bytes,
         )
+        print(f"[Agente] Processamento concluído para {telefone}")
     except Exception as e:
         safe_msg = repr(e).encode('utf-8', 'ignore').decode('utf-8')
         print(f"[Agente] Erro ao processar mensagem de {telefone}: {safe_msg}")
@@ -46,10 +58,12 @@ def webhook_whatsapp(request):
     msg = extrair_webhook(payload)
 
     if not msg:
+        print("[Webhook] Mensagem ignorada (não é mensagens.upsert ou é do bot)")
         return JsonResponse({"ok": True, "ignorado": True})
 
     telefone = msg["telefone"]
     tipo     = msg["tipo"]
+    print(f"[Webhook] Recebido de {telefone} - Tipo: {tipo}")
     texto    = msg.get("texto")
     midia_id = msg.get("midia_id")
     midia_bytes = None
