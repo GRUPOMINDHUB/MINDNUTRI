@@ -65,7 +65,7 @@ def processar_mensagem(telefone: str, tipo: str, texto: str = None,
 
     # â”€â”€ Processar midia â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     estado_atual_midia = estado.get("estado", "")
-    if estado_atual_midia == "aguardando_foto_operacional" and tipo == "imagem" and midia_bytes:
+    if estado_atual_midia in ("coletando_foto_preparo", "aguardando_foto_operacional") and tipo == "imagem" and midia_bytes:
         foto_path = _salvar_foto_prato_operacional(telefone, midia_bytes)
         if foto_path:
             texto = f"[FOTO_PRATO]{foto_path}"
@@ -182,16 +182,12 @@ def processar_mensagem(telefone: str, tipo: str, texto: str = None,
         _fluxo_confirmacao_geracao(telefone, texto, estado, assinante)
         return
 
-    if estado_atual == "aguardando_decisao_ficha_operacional":
-        _fluxo_decisao_ficha_operacional(telefone, texto, estado, assinante)
+    if estado_atual in ("oferecendo_pdf", "aguardando_decisao_ficha_operacional"):
+        _fluxo_oferecendo_pdf(telefone, texto, estado, assinante)
         return
 
-    if estado_atual == "aguardando_foto_operacional":
-        _fluxo_coleta_foto_operacional(telefone, texto, estado, assinante)
-        return
-
-    if estado_atual == "aguardando_modo_preparo_operacional":
-        _fluxo_coleta_modo_preparo_operacional(telefone, texto, estado, assinante)
+    if estado_atual in ("coletando_foto_preparo", "aguardando_foto_operacional", "aguardando_modo_preparo_operacional"):
+        _fluxo_coletando_foto_preparo(telefone, texto, estado, assinante)
         return
 
     # â”€â”€ Estado geral: conversa com a IA â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
@@ -784,6 +780,40 @@ def _fluxo_decisao_ficha_operacional(telefone: str, texto: str, estado: dict, as
         telefone,
         "Me confirma com *SIM* para gerar o PDF operacional tambem, ou *NAO* para seguir apenas com o Excel.",
     )
+
+
+def _fluxo_oferecendo_pdf(telefone: str, texto: str, estado: dict, assinante: dict):
+    """
+    Compatibilidade de estado: delega para o fluxo legado de decisao do PDF.
+    """
+    _fluxo_decisao_ficha_operacional(telefone, texto, estado, assinante)
+
+
+def _fluxo_coletando_foto_preparo(telefone: str, texto: str, estado: dict, assinante: dict):
+    """
+    Compatibilidade de estado:
+    - aceita foto ou texto na mesma etapa;
+    - redireciona para os fluxos legados de foto/modo de preparo.
+    """
+    estado_atual = estado.get("estado", "")
+    texto_limpo = (texto or "").strip()
+    texto_lower = texto_limpo.lower()
+
+    if estado_atual == "aguardando_modo_preparo_operacional":
+        _fluxo_coleta_modo_preparo_operacional(telefone, texto, estado, assinante)
+        return
+
+    if texto_limpo.startswith("[FOTO_PRATO]") or any(
+        p in texto_lower for p in ("sem foto", "pular foto", "nao tenho foto", "não tenho foto")
+    ):
+        _fluxo_coleta_foto_operacional(telefone, texto, estado, assinante)
+        return
+
+    if _normalizar_lista_modo_preparo(texto):
+        _fluxo_coleta_modo_preparo_operacional(telefone, texto, estado, assinante)
+        return
+
+    _fluxo_coleta_foto_operacional(telefone, texto, estado, assinante)
 
 
 def _fluxo_coleta_foto_operacional(telefone: str, texto: str, estado: dict, assinante: dict):
