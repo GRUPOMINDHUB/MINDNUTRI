@@ -4,6 +4,8 @@ from reportlab.lib.units import mm
 from reportlab.pdfgen import canvas
 from reportlab.platypus import Paragraph
 from reportlab.lib.styles import ParagraphStyle
+from reportlab.pdfbase import pdfmetrics
+from reportlab.pdfbase import ttfonts
 from pathlib import Path
 import os
 
@@ -14,6 +16,45 @@ PRETO    = colors.HexColor("#1A1A1A")
 VERMELHO = colors.HexColor("#CC0000")
 CINZA    = colors.HexColor("#888888")
 BRANCO   = colors.white
+
+
+def _registrar_fontes_utf8() -> tuple[str, str]:
+    """
+    Registra fontes TrueType para suportar acentuacao UTF-8.
+    Faz fallback para Helvetica quando nao encontrar arquivos TTF.
+    """
+    regular_name = "Helvetica"
+    bold_name = "Helvetica-Bold"
+
+    candidatos = [
+        (
+            Path(os.environ.get("WINDIR", "C:/Windows")) / "Fonts" / "arial.ttf",
+            Path(os.environ.get("WINDIR", "C:/Windows")) / "Fonts" / "arialbd.ttf",
+            "MindnutriSans",
+            "MindnutriSansBold",
+        ),
+        (
+            Path(os.environ.get("WINDIR", "C:/Windows")) / "Fonts" / "calibri.ttf",
+            Path(os.environ.get("WINDIR", "C:/Windows")) / "Fonts" / "calibrib.ttf",
+            "MindnutriCalibri",
+            "MindnutriCalibriBold",
+        ),
+    ]
+
+    for caminho_regular, caminho_bold, nome_regular, nome_bold in candidatos:
+        if caminho_regular.exists() and caminho_bold.exists():
+            try:
+                if nome_regular not in pdfmetrics.getRegisteredFontNames():
+                    pdfmetrics.registerFont(ttfonts.TTFont(nome_regular, str(caminho_regular)))
+                if nome_bold not in pdfmetrics.getRegisteredFontNames():
+                    pdfmetrics.registerFont(ttfonts.TTFont(nome_bold, str(caminho_bold)))
+                print(f"[PDF] Fonte UTF-8 registrada: {nome_regular}/{nome_bold}")
+                return nome_regular, nome_bold
+            except Exception as exc:
+                print(f"[PDF] Falha ao registrar fonte {nome_regular}: {exc}")
+
+    print("[PDF] Usando fallback Helvetica.")
+    return regular_name, bold_name
 
 
 def _roundrect(c_obj, x, y, w, h, r=8, fill=None, stroke=None, sw=0.5):
@@ -46,8 +87,9 @@ def gerar_ficha_pdf(dados: dict, caminho_saida: str, foto_path: str = None) -> s
     }
     foto_path: caminho para a foto do prato (opcional)
     """
+    font_regular, font_bold = _registrar_fontes_utf8()
     c = canvas.Canvas(caminho_saida, pagesize=landscape(A4))
-    c.setTitle(f"Ficha Operacional — {dados.get('nome_prato', '')}")
+    c.setTitle(f"Ficha Operacional - {dados.get('nome_prato', '')}")
 
     W, H = PAGE_W, PAGE_H
     mg = 18 * mm
@@ -69,12 +111,15 @@ def gerar_ficha_pdf(dados: dict, caminho_saida: str, foto_path: str = None) -> s
         except Exception:
             pass
     c.setFillColor(BRANCO)
-    c.setFont("Helvetica-Bold", 16)
+    c.setFont(font_bold, 16)
     c.drawCentredString(W/2, H - 16*mm, dados.get("nome_prato", "").upper())
-    c.setFont("Helvetica", 9)
+    c.setFont(font_regular, 9)
     c.setFillColor(colors.HexColor("#BBBBBB"))
-    c.drawCentredString(W/2, H - 22*mm,
-        f"{dados.get('classificacao','')}  •  {dados.get('codigo','')}  •  {dados.get('estabelecimento','')}")
+    c.drawCentredString(
+        W/2,
+        H - 22*mm,
+        f"{dados.get('classificacao','')}  |  {dados.get('codigo','')}  |  {dados.get('estabelecimento','')}",
+    )
 
     # Faixa vermelha
     c.setFillColor(VERMELHO)
@@ -116,15 +161,15 @@ def gerar_ficha_pdf(dados: dict, caminho_saida: str, foto_path: str = None) -> s
         c.restoreState()
     else:
         c.setFillColor(CINZA)
-        c.setFont("Helvetica", 8)
+        c.setFont(font_regular, 8)
         c.drawCentredString(fx+fw/2, fy+fh/2+3*mm, "Foto do produto")
-        c.setFont("Helvetica", 7)
+        c.setFont(font_regular, 7)
         c.drawCentredString(fx+fw/2, fy+fh/2-3*mm, "(enviar ao ativar)")
 
     c.setFillColor(PRETO)
-    c.setFont("Helvetica-Bold", 11)
+    c.setFont(font_bold, 11)
     c.drawCentredString(x_foto+col_foto_w/2, fy-10*mm, dados.get("nome_prato",""))
-    c.setFont("Helvetica", 8)
+    c.setFont(font_regular, 8)
     c.setFillColor(CINZA)
     c.drawCentredString(x_foto+col_foto_w/2, fy-15*mm, dados.get("classificacao",""))
 
@@ -133,7 +178,7 @@ def gerar_ficha_pdf(dados: dict, caminho_saida: str, foto_path: str = None) -> s
     by = content_bot + 6*mm
     _roundrect(c, bx, by, bw, bh, r=4, fill=VERMELHO)
     c.setFillColor(BRANCO)
-    c.setFont("Helvetica-Bold", 8)
+    c.setFont(font_bold, 8)
     c.drawCentredString(bx+bw/2, by+bh/2-1*mm, f"Cód: {dados.get('codigo','')}")
 
     # ── COLUNA 2: INGREDIENTES ──
@@ -141,7 +186,7 @@ def gerar_ficha_pdf(dados: dict, caminho_saida: str, foto_path: str = None) -> s
                r=10, fill=BRANCO, stroke=colors.HexColor("#DDDDDD"), sw=0.8)
 
     c.setFillColor(PRETO)
-    c.setFont("Helvetica-Bold", 10)
+    c.setFont(font_bold, 10)
     c.drawString(x_ing+5*mm, content_bot+content_h-8*mm, "INGREDIENTES")
     c.setStrokeColor(VERMELHO)
     c.setLineWidth(1.5)
@@ -161,13 +206,13 @@ def gerar_ficha_pdf(dados: dict, caminho_saida: str, foto_path: str = None) -> s
         c.setFillColor(VERMELHO)
         c.circle(cx_, cy_, r_, fill=1, stroke=0)
         c.setFillColor(BRANCO)
-        c.setFont("Helvetica-Bold", 7)
+        c.setFont(font_bold, 7)
         c.drawCentredString(cx_, cy_-1.5*mm, str(i+1))
         c.setFillColor(colors.HexColor("#444444"))
-        c.setFont("Helvetica-Bold", 8)
+        c.setFont(font_bold, 8)
         c.drawString(x_ing+12*mm, y-1.5*mm, str(qtd))
         c.setFillColor(PRETO)
-        c.setFont("Helvetica", 8)
+        c.setFont(font_regular, 8)
         c.drawString(x_ing+32*mm, y-1.5*mm, str(ing)[:50])
         if i < len(ingredientes)-1:
             c.setStrokeColor(colors.HexColor("#EEEEEE"))
@@ -179,7 +224,7 @@ def gerar_ficha_pdf(dados: dict, caminho_saida: str, foto_path: str = None) -> s
                r=10, fill=BRANCO, stroke=colors.HexColor("#DDDDDD"), sw=0.8)
 
     c.setFillColor(PRETO)
-    c.setFont("Helvetica-Bold", 10)
+    c.setFont(font_bold, 10)
     c.drawString(x_mont+5*mm, content_bot+content_h-8*mm, "MODO DE PREPARO")
     c.setStrokeColor(VERMELHO)
     c.setLineWidth(1.5)
@@ -189,7 +234,7 @@ def gerar_ficha_pdf(dados: dict, caminho_saida: str, foto_path: str = None) -> s
     passos      = dados.get("modo_preparo", [])
     mont_start  = content_bot + content_h - 13*mm
     lh2         = min((mont_start - content_bot - 4*mm) / max(len(passos),1), 14*mm)
-    style_p     = ParagraphStyle("p", fontName="Helvetica", fontSize=7.5, leading=10, textColor=PRETO)
+    style_p     = ParagraphStyle("p", fontName=font_regular, fontSize=7.5, leading=10, textColor=PRETO)
 
     for i, passo in enumerate(passos):
         y = mont_start - i*lh2
@@ -198,7 +243,7 @@ def gerar_ficha_pdf(dados: dict, caminho_saida: str, foto_path: str = None) -> s
         c.setFillColor(PRETO)
         c.circle(cx_, cy_, r_, fill=1, stroke=0)
         c.setFillColor(BRANCO)
-        c.setFont("Helvetica-Bold", 7)
+        c.setFont(font_bold, 7)
         c.drawCentredString(cx_, cy_-1.5*mm, str(i+1))
         par = Paragraph(str(passo), style_p)
         pw, ph = par.wrap(col_mont_w-16*mm, lh2)
@@ -212,8 +257,8 @@ def gerar_ficha_pdf(dados: dict, caminho_saida: str, foto_path: str = None) -> s
     c.setFillColor(PRETO)
     c.rect(0, 0, W, 14*mm, fill=1, stroke=0)
     c.setFillColor(BRANCO)
-    c.setFont("Helvetica", 7)
-    c.drawString(mg, 5*mm, "Documento gerado pelo Mindnutri — Agente de IA Mindhub")
+    c.setFont(font_regular, 7)
+    c.drawString(mg, 5*mm, "Documento gerado pelo Mindnutri - Agente de IA Mindhub")
     c.drawRightString(W-mg, 5*mm, "www.mindhub.com.br  |  Uso exclusivo interno")
     c.setFillColor(VERMELHO)
     c.rect(0, 14*mm, W, 1.5*mm, fill=1, stroke=0)

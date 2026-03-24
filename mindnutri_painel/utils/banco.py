@@ -70,6 +70,25 @@ def incrementar_ficha(telefone: str):
         pass
 
 
+def possui_ficha_no_mes(telefone: str, nome_prato: str, tipo: str | None = None) -> bool:
+    """Retorna True se ja existir ficha para o prato no mes atual."""
+    try:
+        assinante = Assinante.objects.get(telefone=telefone)
+    except Assinante.DoesNotExist:
+        return False
+
+    hoje = timezone.localdate()
+    qs = FichaTecnica.objects.filter(
+        assinante=assinante,
+        nome_prato__iexact=(nome_prato or "").strip(),
+        criada_em__year=hoje.year,
+        criada_em__month=hoje.month,
+    )
+    if tipo:
+        qs = qs.filter(tipo=tipo)
+    return qs.exists()
+
+
 # ── CONVERSAS ─────────────────────────────────────────────────────
 
 def salvar_mensagem(telefone: str, role: str, content: str):
