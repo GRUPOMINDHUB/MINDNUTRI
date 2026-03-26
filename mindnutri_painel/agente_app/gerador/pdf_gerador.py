@@ -112,7 +112,7 @@ def gerar_ficha_pdf(dados: dict, caminho_saida: str, foto_path: str = None) -> s
             pass
     c.setFillColor(BRANCO)
     c.setFont(font_bold, 16)
-    c.drawCentredString(W/2, H - 16*mm, dados.get("nome_prato", "").upper())
+    c.drawCentredString(W/2, H - 16*mm, (dados.get("nome_prato", "") or "").strip().title().upper())
     c.setFont(font_regular, 9)
     c.setFillColor(colors.HexColor("#BBBBBB"))
     c.drawCentredString(
@@ -166,20 +166,13 @@ def gerar_ficha_pdf(dados: dict, caminho_saida: str, foto_path: str = None) -> s
         c.setFont(font_regular, 7)
         c.drawCentredString(fx+fw/2, fy+fh/2-3*mm, "(enviar ao ativar)")
 
+    nome_prato_display = (dados.get("nome_prato", "") or "").strip().title()
     c.setFillColor(PRETO)
     c.setFont(font_bold, 11)
-    c.drawCentredString(x_foto+col_foto_w/2, fy-10*mm, dados.get("nome_prato",""))
+    c.drawCentredString(x_foto+col_foto_w/2, fy-10*mm, nome_prato_display)
     c.setFont(font_regular, 8)
     c.setFillColor(CINZA)
     c.drawCentredString(x_foto+col_foto_w/2, fy-15*mm, dados.get("classificacao",""))
-
-    bw,bh = 28*mm,7*mm
-    bx = x_foto + (col_foto_w-bw)/2
-    by = content_bot + 6*mm
-    _roundrect(c, bx, by, bw, bh, r=4, fill=VERMELHO)
-    c.setFillColor(BRANCO)
-    c.setFont(font_bold, 8)
-    c.drawCentredString(bx+bw/2, by+bh/2-1*mm, f"Cód: {dados.get('codigo','')}")
 
     # ── COLUNA 2: INGREDIENTES ──
     _roundrect(c, x_ing, content_bot, col_ing_w, content_h,
@@ -233,25 +226,40 @@ def gerar_ficha_pdf(dados: dict, caminho_saida: str, foto_path: str = None) -> s
 
     passos      = dados.get("modo_preparo", [])
     mont_start  = content_bot + content_h - 13*mm
-    lh2         = min((mont_start - content_bot - 4*mm) / max(len(passos),1), 14*mm)
+    avail_h     = mont_start - content_bot - 4*mm
+    text_w      = col_mont_w - 16*mm
     style_p     = ParagraphStyle("p", fontName=font_regular, fontSize=7.5, leading=10, textColor=PRETO)
 
-    for i, passo in enumerate(passos):
-        y = mont_start - i*lh2
+    # Pré-calcular altura real de cada passo para distribuir espaço
+    paragraphs = []
+    total_h = 0
+    for passo in passos:
+        par = Paragraph(str(passo), style_p)
+        pw, ph = par.wrap(text_w, 200)
+        row_h = max(ph + 3*mm, 8*mm)  # mínimo 8mm por passo
+        paragraphs.append((par, ph, row_h))
+        total_h += row_h
+
+    # Se ultrapassar o espaço, comprimir proporcionalmente
+    if total_h > avail_h and total_h > 0:
+        scale = avail_h / total_h
+        paragraphs = [(p, ph, rh * scale) for p, ph, rh in paragraphs]
+
+    cursor_y = mont_start
+    for i, (par, ph, row_h) in enumerate(paragraphs):
         r_ = 3.2*mm
-        cx_, cy_ = x_mont+5*mm+r_, y-2*mm
+        cx_, cy_ = x_mont+5*mm+r_, cursor_y - row_h/2
         c.setFillColor(PRETO)
         c.circle(cx_, cy_, r_, fill=1, stroke=0)
         c.setFillColor(BRANCO)
         c.setFont(font_bold, 7)
         c.drawCentredString(cx_, cy_-1.5*mm, str(i+1))
-        par = Paragraph(str(passo), style_p)
-        pw, ph = par.wrap(col_mont_w-16*mm, lh2)
-        par.drawOn(c, x_mont+12*mm, y-ph-1*mm)
+        par.drawOn(c, x_mont+12*mm, cursor_y - ph - 1*mm)
+        cursor_y -= row_h
         if i < len(passos)-1:
             c.setStrokeColor(colors.HexColor("#EEEEEE"))
             c.setLineWidth(0.3)
-            c.line(x_mont+4*mm, y-lh2+1*mm, x_mont+col_mont_w-4*mm, y-lh2+1*mm)
+            c.line(x_mont+4*mm, cursor_y, x_mont+col_mont_w-4*mm, cursor_y)
 
     # Rodapé
     c.setFillColor(PRETO)
@@ -259,7 +267,7 @@ def gerar_ficha_pdf(dados: dict, caminho_saida: str, foto_path: str = None) -> s
     c.setFillColor(BRANCO)
     c.setFont(font_regular, 7)
     c.drawString(mg, 5*mm, "Documento gerado pelo Mindnutri - Agente de IA Mindhub")
-    c.drawRightString(W-mg, 5*mm, "www.mindhub.com.br  |  Uso exclusivo interno")
+    c.drawRightString(W-mg, 5*mm, "@grupo.mindhub  |  Uso exclusivo interno")
     c.setFillColor(VERMELHO)
     c.rect(0, 14*mm, W, 1.5*mm, fill=1, stroke=0)
 

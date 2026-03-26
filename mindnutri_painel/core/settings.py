@@ -104,7 +104,7 @@ STORAGE_LOCAL_PATH = os.getenv("STORAGE_LOCAL_PATH", "./arquivos_gerados")
 GESTOR_WHATSAPP = os.getenv("GESTOR_WHATSAPP", "")
 
 # Plano
-PLANO_VALOR         = float(os.getenv("PLANO_VALOR", "59.90"))
+PLANO_VALOR         = float(os.getenv("PLANO_VALOR", "89.90"))
 PLANO_FICHAS_LIMITE = int(os.getenv("PLANO_FICHAS_LIMITE", "30"))
 
 # Modelo OpenAI

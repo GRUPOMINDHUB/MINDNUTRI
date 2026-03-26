@@ -336,6 +336,9 @@ select.filtro-input{cursor:pointer}
     <a href="{% url 'fichas' %}" class="nav-item {% if page == 'fichas' %}active{% endif %}">
       <span class="icon">▤</span> Fichas geradas
     </a>
+    <a href="{% url 'financeiro' %}" class="nav-item {% if page == 'financeiro' %}active{% endif %}">
+      <span class="icon">$</span> Financeiro
+    </a>
 
     <div class="nav-section">Alertas</div>
     <a href="{% url 'notificacoes' %}" class="nav-item {% if page == 'notificacoes' %}active{% endif %}">
@@ -343,6 +346,11 @@ select.filtro-input{cursor:pointer}
       {% if notif_nao_lidas > 0 %}
       <span class="nav-badge">{{ notif_nao_lidas }}</span>
       {% endif %}
+    </a>
+
+    <div class="nav-section">Sistema</div>
+    <a href="{% url 'configuracoes_ia' %}" class="nav-item {% if page == 'configuracoes' %}active{% endif %}">
+      <span class="icon">⬡</span> Configurações do Modelo
     </a>
   </nav>
 

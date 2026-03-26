@@ -1,3 +1,4 @@
+from painel.mensagens_cache import msg as _msg
 import json
 import logging
 import re
@@ -6,6 +7,8 @@ import requests
 from django.conf import settings as config
 
 from utils import banco
+
+logger = logging.getLogger(__name__)
 
 HEADERS = {
     "access_token": config.ASAAS_API_KEY,
@@ -17,8 +20,7 @@ def _get(endpoint: str) -> dict:
     url = f"{config.ASAAS_BASE_URL}/{endpoint}"
     r = requests.get(url, headers=HEADERS, timeout=15)
     if r.status_code >= 400:
-        logging.error(f"[Asaas] GET {endpoint} HTTP {r.status_code}: {r.text}")
-        print(f"[Asaas] GET {endpoint} HTTP {r.status_code}: {r.text}")
+        logger.error("[Asaas] GET %s HTTP %s: %s", endpoint, r.status_code, r.text)
     r.raise_for_status()
     return r.json()
 
@@ -27,8 +29,7 @@ def _post(endpoint: str, payload: dict) -> dict:
     url = f"{config.ASAAS_BASE_URL}/{endpoint}"
     r = requests.post(url, json=payload, headers=HEADERS, timeout=15)
     if r.status_code >= 400:
-        logging.error(f"[Asaas] POST {endpoint} HTTP {r.status_code}: {r.text}")
-        print(f"[Asaas] POST {endpoint} HTTP {r.status_code}: {r.text}")
+        logger.error("[Asaas] POST %s HTTP %s: %s", endpoint, r.status_code, r.text)
     r.raise_for_status()
     return r.json()
 
@@ -37,8 +38,7 @@ def _update(endpoint: str, payload: dict) -> dict:
     url = f"{config.ASAAS_BASE_URL}/{endpoint}"
     r = requests.put(url, json=payload, headers=HEADERS, timeout=15)
     if r.status_code >= 400:
-        logging.error(f"[Asaas] PUT {endpoint} HTTP {r.status_code}: {r.text}")
-        print(f"[Asaas] PUT {endpoint} HTTP {r.status_code}: {r.text}")
+        logger.error("[Asaas] PUT %s HTTP %s: %s", endpoint, r.status_code, r.text)
     r.raise_for_status()
     return r.json()
 
@@ -49,7 +49,7 @@ def _formatar_telefone(telefone: str) -> str:
     if not fone.startswith("55"):
         fone = "55" + fone
 
-    print(f"[Asaas] Telefone formatado: {telefone} -> {fone}")
+    logger.debug("[Asaas] Telefone formatado: %s -> %s", telefone, fone)
     return fone
 
 
@@ -63,12 +63,12 @@ def criar_ou_buscar_cliente(telefone: str, nome: str = None) -> str:
         try:
             customer_data = _get(f"customers/{customer_id}")
             if not customer_data.get("cpfCnpj"):
-                print(f"[Asaas] Customer {customer_id} sem CPF. Atualizando com {cpf_cliente}...")
+                logger.info("[Asaas] Customer %s sem CPF. Atualizando com %s...", customer_id, cpf_cliente)
                 _update(f"customers/{customer_id}", {"cpfCnpj": cpf_cliente})
-            print(f"[Asaas] Customer ID existente e valido: {customer_id}")
+            logger.info("[Asaas] Customer ID existente e valido: %s", customer_id)
             return customer_id
         except Exception:
-            print(f"[Asaas] Customer ID obsoleto: {customer_id}. Criando novo...")
+            logger.warning("[Asaas] Customer ID obsoleto: %s. Criando novo...", customer_id)
 
     nome_cliente = nome or assinante.get("nome") or f"Assinante {telefone[-4:]}"
     fone_limpo = _formatar_telefone(telefone)
@@ -85,12 +85,12 @@ def criar_ou_buscar_cliente(telefone: str, nome: str = None) -> str:
         )
         customer_id = data["id"]
         banco.atualizar_assinante(telefone, asaas_customer_id=customer_id)
-        print(f"[Asaas] Cliente criado com sucesso: {customer_id}")
+        logger.info("[Asaas] Cliente criado com sucesso: %s", customer_id)
         return customer_id
 
     except requests.exceptions.HTTPError as e:
         resp_text = e.response.text if hasattr(e, "response") and e.response is not None else str(e)
-        print(f"[Asaas] Erro ao criar cliente: {resp_text}")
+        logger.error("[Asaas] Erro ao criar cliente: %s", resp_text)
 
         if e.response is not None and e.response.status_code == 400:
             try:
@@ -98,10 +98,10 @@ def criar_ou_buscar_cliente(telefone: str, nome: str = None) -> str:
                 if customers.get("data"):
                     customer_id = customers["data"][0]["id"]
                     banco.atualizar_assinante(telefone, asaas_customer_id=customer_id)
-                    print(f"[Asaas] Cliente encontrado por CPF: {customer_id}")
+                    logger.info("[Asaas] Cliente encontrado por CPF: %s", customer_id)
                     return customer_id
             except Exception as inner_e:
-                print(f"[Asaas] Falha na busca alternativa: {inner_e}")
+                logger.error("[Asaas] Falha na busca alternativa: %s", inner_e)
 
         raise e
 
@@ -112,32 +112,39 @@ def criar_cobranca_assinatura(telefone: str) -> str:
     return data.get("url", "")
 
 
-def criar_link_assinatura_cartao(telefone: str) -> dict:
+def criar_link_assinatura_cartao(telefone: str, valor_primeiro_pagamento: float = None) -> dict:
     """
     Gera um payment link recorrente em cartao.
-    Este e o caminho padrao suportado pelo Asaas para recorrencia automatica.
+    Se valor_primeiro_pagamento for diferente do PLANO_VALOR (cupom), cria link avulso pro primeiro
+    e depois a recorrencia normal é tratada pelo webhook.
     """
     assinante = banco.get_assinante(telefone) or {}
     customer_id = criar_ou_buscar_cliente(telefone)
     nome = assinante.get("nome") or f"Assinante {telefone[-4:]}"
+    valor = valor_primeiro_pagamento or config.PLANO_VALOR
 
-    print(f"[Asaas] Criando payment link recorrente em cartao para {telefone} (customer={customer_id})")
+    logger.info("[Asaas] Criando payment link em cartao para %s (customer=%s, valor=%s)", telefone, customer_id, valor)
 
-    data = _post(
-        "paymentLinks",
-        {
-            "billingType": "CREDIT_CARD",
-            "chargeType": "RECURRENT",
-            "name": f"Mindnutri Assinatura {telefone[-4:]}",
-            "description": "Mindhub Mindnutri - Assinatura Mensal",
-            "value": config.PLANO_VALOR,
-            "subscriptionCycle": "MONTHLY",
-            "notificationEnabled": False,
-            "externalReference": telefone,
-        },
-    )
+    payload = {
+        "billingType": "CREDIT_CARD",
+        "chargeType": "RECURRENT",
+        "name": f"Mindnutri Assinatura {telefone[-4:]}",
+        "description": "Mindhub Mindnutri - Assinatura Mensal",
+        "value": valor,
+        "subscriptionCycle": "MONTHLY",
+        "notificationEnabled": False,
+        "externalReference": telefone,
+    }
 
-    print(f"[Asaas] Payment link recorrente criado: {data.get('id')} -> {data.get('url')}")
+    # Se tem cupom (valor diferente), cria link avulso pro primeiro pagamento
+    if valor_primeiro_pagamento and valor_primeiro_pagamento != config.PLANO_VALOR:
+        payload["chargeType"] = "DETACHED"
+        payload["description"] = f"Mindnutri - 1o mes com cupom (R$ {valor:.2f})"
+        del payload["subscriptionCycle"]
+
+    data = _post("paymentLinks", payload)
+
+    logger.info("[Asaas] Payment link recorrente criado: %s -> %s", data.get('id'), data.get('url'))
     return {
         "payment_link_id": data.get("id", ""),
         "url": data.get("url", ""),
@@ -149,7 +156,7 @@ def criar_link_assinatura_cartao(telefone: str) -> dict:
 def criar_link_cartao_avulso(telefone: str, valor: float, descricao: str) -> dict:
     """Gera um payment link avulso em cartao, sem boleto."""
     customer_id = criar_ou_buscar_cliente(telefone)
-    print(f"[Asaas] Criando payment link avulso em cartao para {telefone} (customer={customer_id})")
+    logger.info("[Asaas] Criando payment link avulso em cartao para %s (customer=%s)", telefone, customer_id)
 
     data = _post(
         "paymentLinks",
@@ -164,7 +171,7 @@ def criar_link_cartao_avulso(telefone: str, valor: float, descricao: str) -> dic
         },
     )
 
-    print(f"[Asaas] Payment link avulso criado: {data.get('id')} -> {data.get('url')}")
+    logger.info("[Asaas] Payment link avulso criado: %s -> %s", data.get('id'), data.get('url'))
     return {
         "payment_link_id": data.get("id", ""),
         "url": data.get("url", ""),
@@ -196,7 +203,7 @@ def criar_cobranca_pix(telefone: str, valor: float, descricao: str) -> dict:
     try:
         qr_data = _get(f"payments/{payment_id}/pixQrCode")
     except Exception as exc:
-        print(f"[Asaas] Pix criado sem QR complementar: {exc}")
+        logger.warning("[Asaas] Pix criado sem QR complementar: %s", exc)
 
     return {
         "payment_id": payment_id,
@@ -213,7 +220,7 @@ def criar_cobranca_avulsa(telefone: str, valor: float, descricao: str) -> str:
     return data.get("url", "")
 
 
-def processar_webhook_asaas(evento: str, payment_data: dict):
+def processar_webhook_asaas(evento: str, payment_data: dict) -> None:
     """
     Processa webhooks do Asaas:
     PAYMENT_CONFIRMED/PAYMENT_RECEIVED -> ativa ou renova
@@ -227,7 +234,7 @@ def processar_webhook_asaas(evento: str, payment_data: dict):
     if not assinante and payment_link_id:
         assinante = _buscar_por_payment_link_id(payment_link_id)
     if not assinante:
-        print(f"[Asaas] Webhook ignorado - customer nao encontrado: {customer_id} / paymentLink: {payment_link_id}")
+        logger.warning("[Asaas] Webhook ignorado - customer nao encontrado: %s / paymentLink: %s", customer_id, payment_link_id)
         return
 
     telefone = assinante["telefone"]
@@ -265,11 +272,7 @@ def processar_webhook_asaas(evento: str, payment_data: dict):
             )
             from utils.whatsapp import enviar_texto
 
-            enviar_texto(
-                telefone,
-                "Pagamento recebido com sucesso.\n\n"
-                "Seu ciclo do Mindnutri foi renovado e suas fichas do mes foram liberadas novamente.",
-            )
+            enviar_texto(telefone, _msg("webhook_pagamento_renovado"))
 
     elif evento == "PAYMENT_OVERDUE":
         banco.atualizar_assinante(telefone, status="inadimplente")
@@ -282,11 +285,7 @@ def processar_webhook_asaas(evento: str, payment_data: dict):
         )
         from utils.whatsapp import enviar_texto
 
-        enviar_texto(
-            telefone,
-            "Seu pagamento esta em atraso e seu acesso foi suspenso.\n\n"
-            "Para reativar, acesse o link abaixo ou entre em contato com nosso suporte.",
-        )
+        enviar_texto(telefone, _msg("webhook_pagamento_atraso"))
 
     elif evento in ("SUBSCRIPTION_INACTIVATED", "PAYMENT_DELETED"):
         banco.atualizar_assinante(telefone, status="cancelado")
@@ -332,8 +331,8 @@ def _buscar_por_payment_link_id(payment_link_id: str) -> dict | None:
     return None
 
 
-def _boas_vindas_pos_pagamento(telefone: str):
-    """Leva o assinante ao menu principal apos o primeiro pagamento."""
+def _boas_vindas_pos_pagamento(telefone: str) -> None:
+    """Boas-vindas ao novo assinante após confirmar o pagamento."""
     from utils.whatsapp import enviar_texto
     from utils.banco import resetar_estado
 
@@ -342,13 +341,5 @@ def _boas_vindas_pos_pagamento(telefone: str):
     fichas_rest = assinante.get("fichas_limite_mes", getattr(config, "PLANO_FICHAS_LIMITE", 30))
 
     resetar_estado(telefone)
-    enviar_texto(
-        telefone,
-        "Parabens! Sua assinatura Mindnutri foi ativada.\n\n"
-        f"Ola, {nome}! Como posso te ajudar hoje?\n\n"
-        "1 - Criar ficha tecnica (XLSX)\n"
-        "2 - Criar ficha operacional (PDF)\n"
-        "3 - Calcular custo rapido de um prato\n"
-        "4 - Ver meus ingredientes cadastrados\n\n"
-        f"Fichas disponiveis este mes: {fichas_rest}/30",
-    )
+    enviar_texto(telefone, _msg("webhook_boas_vindas", nome=nome, fichas_rest=fichas_rest))
+

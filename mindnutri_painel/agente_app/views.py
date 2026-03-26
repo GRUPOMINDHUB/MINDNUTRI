@@ -4,6 +4,7 @@ Recebe webhooks da Evolution API e do Asaas.
 """
 import sys
 import json
+import logging
 import threading
 import io
 
@@ -22,11 +23,14 @@ from utils import banco, whatsapp
 from utils.asaas import processar_webhook_asaas
 from agente_app.nucleo import processar_mensagem
 
+logger = logging.getLogger(__name__)
 
-def _processar_em_background(telefone, tipo, texto, midia_id, midia_bytes):
+
+def _processar_em_background(telefone: str, tipo: str, texto: str | None,
+                              midia_id: str | None, midia_bytes: bytes | None) -> None:
     """Processa a mensagem em thread separada para não bloquear o webhook."""
     try:
-        print(f"[Agente] Iniciando processamento para {telefone} (tipo: {tipo})")
+        logger.info("[Agente] Iniciando processamento para %s (tipo: %s)", telefone, tipo)
         processar_mensagem(
             telefone=telefone,
             tipo=tipo,
@@ -34,12 +38,10 @@ def _processar_em_background(telefone, tipo, texto, midia_id, midia_bytes):
             midia_id=midia_id,
             midia_bytes=midia_bytes,
         )
-        print(f"[Agente] Processamento concluído para {telefone}")
+        logger.info("[Agente] Processamento concluído para %s", telefone)
     except Exception as e:
         safe_msg = repr(e).encode('utf-8', 'ignore').decode('utf-8')
-        print(f"[Agente] Erro ao processar mensagem de {telefone}: {safe_msg}")
-        import traceback
-        traceback.print_exc()
+        logger.error("[Agente] Erro ao processar mensagem de %s: %s", telefone, safe_msg, exc_info=True)
 
 
 @csrf_exempt
@@ -58,20 +60,26 @@ def webhook_whatsapp(request):
     msg = extrair_webhook(payload)
 
     if not msg:
-        print("[Webhook] Mensagem ignorada (não é mensagens.upsert ou é do bot)")
+        logger.debug("[Webhook] Mensagem ignorada (não é mensagens.upsert ou é do bot)")
         return JsonResponse({"ok": True, "ignorado": True})
 
     telefone = msg["telefone"]
     tipo     = msg["tipo"]
-    print(f"[Webhook] Recebido de {telefone} - Tipo: {tipo}")
+    logger.info("[Webhook] Recebido de %s - Tipo: %s", telefone, tipo)
     texto    = msg.get("texto")
     midia_id = msg.get("midia_id")
+    mensagem_completa = msg.get("mensagem_completa")
     midia_bytes = None
 
     # Baixar mídia se necessário
     if midia_id and tipo in ("audio", "imagem", "documento"):
         from utils.whatsapp import baixar_midia
-        midia_bytes = baixar_midia(None, midia_id)
+        logger.info("[Webhook] Baixando midia: id=%s tem_msg_completa=%s", midia_id, mensagem_completa is not None)
+        midia_bytes = baixar_midia(
+            media_key=midia_id,
+            mensagem_completa=mensagem_completa,
+        )
+        logger.info("[Webhook] Resultado download: %s", f"OK {len(midia_bytes)} bytes" if midia_bytes else "FALHOU")
 
     # Processa em background (responde ao webhook imediatamente)
     t = threading.Thread(
@@ -98,13 +106,4 @@ def webhook_asaas(request):
 
     processar_webhook_asaas(evento, payment_data)
 
-    return JsonResponse({"ok": True})
-
-
-@csrf_exempt
-def onboarding_continuar(request):
-    """
-    Processa respostas do onboarding pós-pagamento.
-    O onboarding é feito via WhatsApp — essa view é apenas para referência.
-    """
     return JsonResponse({"ok": True})

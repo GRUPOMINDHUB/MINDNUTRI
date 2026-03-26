@@ -1,4 +1,4 @@
-﻿import json
+import json
 import re
 import os
 import tempfile
@@ -6,7 +6,6 @@ import unicodedata
 from datetime import datetime
 from pathlib import Path
 import logging
-import traceback
 
 # ConfiguraÃ§Ã£o de log em arquivo
 logging.basicConfig(
@@ -14,12 +13,14 @@ logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s [%(levelname)s] %(message)s'
 )
+logger = logging.getLogger(__name__)
 
 import openai
 import requests
 
 from django.conf import settings as config
 from agente_app.prompt import SYSTEM_PROMPT
+from painel.mensagens_cache import msg as _msg
 from utils import banco, whatsapp, midia, storage
 from agente_app.gerador import xlsx_gerador, pdf_gerador
 
@@ -29,421 +30,466 @@ _gpt = openai.OpenAI(api_key=config.OPENAI_API_KEY)
 ASSETS_DIR   = Path(__file__).parent.parent / "assets"
 EXEMPLOS_DIR = Path(__file__).parent.parent / "exemplos"
 
-# Contador de falhas de entendimento por telefone
+# Contador de falhas de entendimento por telefone.
+# Note: not thread-safe; acceptable for single-process --noreload deployments.
+# For multi-process/threaded setups, move to a persistent store (e.g. banco).
 _falhas: dict[str, int] = {}
 
 
-# â”€â”€ ENTRADA PRINCIPAL â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+
+# ── HELPERS DE DETECÇÃO ───────────────────────────────────────────────────────
+
+_FRASES_ZERO = (
+    "comecar do zero", "começar do zero", "recomecar", "recomeçar",
+    "reiniciar", "do zero", "start over", "reset", "apagar tudo",
+    "quero comecar", "quero começar",
+)
+
+def _quer_comecar_do_zero(texto: str) -> bool:
+    t = (texto or "").lower().strip()
+    return any(f in t for f in _FRASES_ZERO)
+
+
+def _iniciar_boas_vindas(telefone: str) -> None:
+    banco.set_estado(telefone, "aguardando_nicho_demo", {})
+    whatsapp.enviar_texto(telefone, _msg("boas_vindas_inicial"))
+
 
 def processar_mensagem(telefone: str, tipo: str, texto: str = None,
-                        midia_id: str = None, midia_bytes: bytes = None):
-    """
-    Ponto de entrada Ãºnico para todas as mensagens recebidas.
-    Chamado pelo webhook do Django.
-    """
-    # â”€â”€ LOG DE ENTRADA â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-    print(f"[Recebido] Mensagem de {telefone}: {texto}")
-    logging.info(f"[Recebido] telefone={telefone} tipo={tipo} texto={texto}")
+                       midia_id: str = None, midia_bytes: bytes = None) -> None:
+    """Ponto de entrada único para todas as mensagens recebidas."""
+    logger.info(f"[Recebido] telefone={telefone} tipo={tipo} texto={texto}")
 
-    # Garante que assinante existe no banco (qualquer numero, sem restricao)
-    if not banco.get_assinante(telefone):
-        print(f"[Novo] Numero {telefone} nao encontrado no banco. Criando assinante...")
-        logging.info(f"[Novo] Criando assinante para {telefone}")
-        banco.criar_assinante(telefone)
+    estado = banco.get_estado(telefone)
 
-    assinante = banco.get_assinante(telefone)
-    estado    = banco.get_estado(telefone)
-
-    # Forca estado inicial para assinantes novos sem estado definido
-    if assinante["status"] == "pendente" and (not estado["estado"] or estado["estado"] == "inicio"):
-        banco.set_estado(telefone, "boas_vindas_inicio", {})
-        estado = banco.get_estado(telefone)
-
-    # â”€â”€ LOG DE DEBUG (TAREFA 3) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-    print(f"[DEBUG] Telefone: {telefone} | Estado Atual: {estado['estado']}")
-    logging.info(f"[DEBUG] Telefone: {telefone} | Estado Atual: {estado['estado']} | Status: {assinante['status']}")
-
-    # â”€â”€ Processar midia â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # ── Processar mídia ──────────────────────────────────────────────
     estado_atual_midia = estado.get("estado", "")
+    logger.debug(f"[Midia] estado={estado_atual_midia} tipo={tipo} tem_midia_bytes={midia_bytes is not None}")
     if estado_atual_midia in ("coletando_foto_preparo", "aguardando_foto_operacional") and tipo == "imagem" and midia_bytes:
+        logger.debug(f"[Midia] Salvando foto do prato ({len(midia_bytes)} bytes)")
         foto_path = _salvar_foto_prato_operacional(telefone, midia_bytes)
         if foto_path:
             texto = f"[FOTO_PRATO]{foto_path}"
             tipo = "texto"
-            print(f"[Fluxo PDF] Foto recebida para {telefone}: {foto_path}")
+            logger.debug(f"[Midia] Foto salva com sucesso: {foto_path}")
         else:
-            whatsapp.enviar_texto(
-                telefone,
-                "Nao consegui salvar sua foto agora. Pode tentar enviar novamente?",
-            )
+            whatsapp.enviar_texto(telefone, _msg("foto_nao_salva"))
             return
+    elif estado_atual_midia in ("coletando_foto_preparo", "aguardando_foto_operacional") and tipo == "imagem" and not midia_bytes:
+        logger.error("[Midia] Imagem recebida mas midia_bytes está vazio!")
+        whatsapp.enviar_texto(telefone, _msg("foto_nao_salva"))
+        return
     elif tipo == "audio" and midia_bytes:
-        texto_transcrito = midia.transcrever_audio(midia_bytes)
+        try:
+            texto_transcrito = midia.transcrever_audio(midia_bytes)
+        except Exception as e:
+            logger.error(f"[Midia] Falha ao transcrever audio de {telefone}: {e}")
+            whatsapp.enviar_texto(telefone, _msg("audio_nao_transcrito"))
+            return
         if not texto_transcrito:
-            _registrar_falha(telefone, assinante)
+            whatsapp.enviar_texto(telefone, _msg("audio_nao_transcrito"))
             return
         texto = texto_transcrito
-
     elif tipo == "imagem" and midia_bytes:
-        ingredientes_extraidos = midia.extrair_ingredientes_de_imagem(midia_bytes)
+        try:
+            ingredientes_extraidos = midia.extrair_ingredientes_de_imagem(midia_bytes)
+        except Exception as e:
+            logger.error(f"[Midia] Falha ao extrair ingredientes de imagem de {telefone}: {e}")
+            whatsapp.enviar_texto(telefone,
+                "Recebi sua imagem, mas não consegui processá-la. "
+                "Pode tentar enviar novamente ou descrever por texto?")
+            return
         texto = f"[IMAGEM ENVIADA]\nIngredientes identificados na imagem:\n{ingredientes_extraidos}"
-
+    elif tipo == "imagem" and not midia_bytes:
+        logger.error("[Midia] Imagem recebida fora do fluxo de foto, midia_bytes vazio!")
+        whatsapp.enviar_texto(telefone,
+            "Recebi sua imagem, mas não consegui processá-la. "
+            "Pode tentar enviar novamente ou descrever por texto?")
+        return
     elif tipo == "documento" and midia_bytes:
-        texto = "[DOCUMENTO ENVIADO] O cliente enviou um documento para analise."
+        texto = "[DOCUMENTO ENVIADO] O cliente enviou um documento para análise."
 
     if not texto:
-        whatsapp.enviar_texto(telefone, "Nao consegui entender sua mensagem. Pode repetir por texto?")
+        whatsapp.enviar_texto(telefone, _msg("mensagem_nao_entendida"))
         return
 
-    # â”€â”€ Fluxo de onboarding (PRIORIDADE MAXIMA para status 'pendente') â”€â”€
-    if assinante["status"] == "pendente":
-        print(f"[Fluxo] {telefone} pendente -> _fluxo_boas_vindas (estado={estado['estado']})")
-        _fluxo_boas_vindas(telefone, texto, estado, assinante)
-        return
-
-    if assinante["status"] in ("bloqueado", "inadimplente"):
-        whatsapp.enviar_texto(
-            telefone,
-            "Seu acesso esta suspenso no momento.\n\n"
-            "Para regularizar sua assinatura, acesse o link de pagamento ou entre em contato com o suporte Mindhub.",
-        )
-        return
-
-    if assinante["status"] == "cancelado":
-        whatsapp.enviar_texto(telefone,
-            "Sua assinatura foi cancelada. Para reativar, entre em contato com a Mindhub. ðŸ’™")
-        return
-
-    # â”€â”€ Verificar comandos especiais â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     texto_lower = texto.lower().strip()
+    est = estado["estado"]
 
-    comandos_reset = ["cancelar", "recomeÃ§ar", "reiniciar", "menu", "/menu"]
+    logger.debug(f"telefone={telefone} estado={est}")
 
-    if texto_lower in comandos_reset:
+    # ── Confirmação de reset em andamento ────────────────────────────
+    if est == "confirmando_reset":
+        if _eh_resposta_sim(texto):
+            banco.limpar_historico(telefone)
+            banco.set_estado(telefone, "inicio", {})
+            _iniciar_boas_vindas(telefone)
+        else:
+            dados = estado.get("dados", {})
+            banco.set_estado(telefone, dados.get("estado_anterior", "inicio"), dados.get("dados_anteriores", {}))
+            whatsapp.enviar_texto(telefone, _msg("continuar_de_onde_parou"))
+        return
+
+    # ── Detectar "quero começar do zero" a qualquer momento ──────────
+    if _quer_comecar_do_zero(texto) and est not in ("inicio", "confirmando_reset", ""):
+        banco.set_estado(telefone, "confirmando_reset", {
+            "estado_anterior": est,
+            "dados_anteriores": estado.get("dados", {}),
+        })
+        whatsapp.enviar_texto(telefone, _msg("confirmar_reset"))
+        return
+
+    # ── Verificar se já é assinante ──────────────────────────────────
+    assinante = banco.get_assinante(telefone)
+
+    if assinante:
+        if assinante["status"] == "pendente":
+            # Ainda não pagou — continuar no fluxo pré-assinatura
+            pass
+        elif assinante["status"] in ("bloqueado", "inadimplente"):
+            whatsapp.enviar_texto(telefone, _msg("acesso_suspenso"))
+            return
+        elif assinante["status"] == "cancelado":
+            whatsapp.enviar_texto(telefone, _msg("assinatura_cancelada"))
+            return
+        else:
+            _fluxo_assinante_ativo(telefone, texto, texto_lower, estado, assinante)
+            return
+
+    # ── Sem assinante: verificar abandono (≥ 60 min) ─────────────────
+    if est not in ("inicio", "aguardando_decisao_retorno", ""):
+        minutos = banco.get_tempo_inativo_minutos(telefone)
+        if minutos >= 60:
+            banco.set_estado(telefone, "aguardando_decisao_retorno", {
+                "estado_anterior": est,
+                "dados_anteriores": estado.get("dados", {}),
+            })
+            whatsapp.enviar_texto(telefone, _msg("retorno_apos_abandono"))
+            return
+
+    if est == "aguardando_decisao_retorno":
+        dados = estado.get("dados", {})
+        if any(w in texto_lower for w in ("continuar", "continua", "parou", "seguir")):
+            banco.set_estado(telefone, dados.get("estado_anterior", "inicio"), dados.get("dados_anteriores", {}))
+            whatsapp.enviar_texto(telefone, _msg("retorno_continuando"))
+            return
+        if any(w in texto_lower for w in ("zero", "comecar", "começar", "novo", "reiniciar")):
+            banco.limpar_historico(telefone)
+            banco.set_estado(telefone, "inicio", {})
+            _iniciar_boas_vindas(telefone)
+            return
+        whatsapp.enviar_texto(telefone, _msg("retorno_instrucao"))
+        return
+
+    # ── Fluxo pré-assinatura ──────────────────────────────────────────
+    _fluxo_pre_assinatura(telefone, texto, texto_lower, estado)
+
+
+# ── FLUXO ASSINANTE ATIVO ─────────────────────────────────────────────────────
+
+def _fluxo_assinante_ativo(telefone: str, texto: str, texto_lower: str,
+                            estado: dict, assinante: dict) -> None:
+    est = estado["estado"]
+
+    # Comandos de menu
+    if texto_lower in ("cancelar", "recomeçar", "reiniciar", "menu", "/menu"):
         banco.resetar_estado(telefone)
         _enviar_menu_principal(telefone, assinante)
         return
 
-    # â”€â”€ Fluxo de demonstraÃ§Ã£o (nÃ£o-assinante em fluxo de venda) â”€â”€
-    if estado["estado"] == "demonstracao":
-        _fluxo_demonstracao(telefone, texto, estado, assinante)
-        return
-
-    # â”€â”€ Verificar fichas disponÃ­veis antes de criar â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # Fichas disponíveis
     fichas_rest = assinante["fichas_limite_mes"] - assinante["fichas_geradas_mes"]
-    if fichas_rest <= 3 and fichas_rest > 0:
-        # Aviso proativo (uma vez)
+    if 0 < fichas_rest <= 3:
         dados_est = estado.get("dados", {})
         if not dados_est.get("aviso_limite_enviado"):
-            whatsapp.enviar_texto(telefone,
-                f"âš ï¸ AtenÃ§Ã£o: vocÃª tem apenas *{fichas_rest} fichas restantes* este mÃªs.")
+            whatsapp.enviar_texto(telefone, _msg("aviso_fichas_poucas", fichas_rest=fichas_rest))
             dados_est["aviso_limite_enviado"] = True
-            banco.set_estado(telefone, estado["estado"], dados_est)
+            banco.set_estado(telefone, est, dados_est)
 
     if fichas_rest <= 0:
-        whatsapp.enviar_texto(telefone,
-            "âš ï¸ VocÃª atingiu o limite de 30 fichas este mÃªs.\n\n"
-            "Deseja renovar antecipadamente? Responda *SIM* para receber o link de pagamento.")
+        whatsapp.enviar_texto(telefone, _msg("limite_fichas_atingido"))
         banco.set_estado(telefone, "aguardando_renovacao", {})
         return
 
-    # â”€â”€ DelegaÃ§Ã£o por estado â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-    estado_atual = estado["estado"]
-
-    if estado_atual == "aguardando_renovacao":
+    if est == "aguardando_renovacao":
         if "sim" in texto_lower:
-            _pedir_metodo_pagamento(
-                telefone,
-                "escolha_pagamento_renovacao",
-                "Como voce prefere fazer a renovacao?",
-            )
+            _pedir_metodo_pagamento(telefone, "escolha_pagamento_renovacao",
+                "Como você prefere fazer a renovação?")
         else:
             banco.resetar_estado(telefone)
             _enviar_menu_principal(telefone, assinante)
         return
 
-    if estado_atual == "escolha_pagamento_renovacao":
+    if est == "escolha_pagamento_renovacao":
         metodo = _interpretar_metodo_pagamento(texto)
         if not metodo:
-            _pedir_metodo_pagamento(
-                telefone,
-                "escolha_pagamento_renovacao",
-                "Nao entendi o metodo de pagamento.",
-            )
+            _pedir_metodo_pagamento(telefone, "escolha_pagamento_renovacao",
+                "Não entendi o método de pagamento.")
             return
         _enviar_link_renovacao(telefone, assinante, metodo)
         return
 
-    if estado_atual.startswith("criando_ficha"):
-        _fluxo_criacao_ficha(telefone, texto, estado, assinante)
+    # Reset no meio de uma ficha: pede confirmação
+    ESTADOS_FICHA = (
+        "aguardando_confirmacao_geracao", "oferecendo_pdf",
+        "aguardando_decisao_ficha_operacional", "coletando_foto_preparo",
+        "aguardando_foto_operacional", "aguardando_modo_preparo_operacional",
+    )
+    if est.startswith("criando_ficha") or est in ESTADOS_FICHA:
+        if texto_lower in ("cancelar", "nova ficha", "novo prato", "recomeçar ficha"):
+            banco.set_estado(telefone, "confirmando_reset_ficha", {
+                "estado_anterior": est,
+                "dados_anteriores": estado.get("dados", {}),
+            })
+            whatsapp.enviar_texto(telefone, _msg("confirmar_cancelar_ficha"))
+            return
+
+    if est == "confirmando_reset_ficha":
+        if _eh_resposta_sim(texto):
+            banco.resetar_estado(telefone)
+            _enviar_menu_principal(telefone, assinante)
+        else:
+            dados = estado.get("dados", {})
+            banco.set_estado(telefone, dados.get("estado_anterior", "inicio"), dados.get("dados_anteriores", {}))
+            whatsapp.enviar_texto(telefone, _msg("continuando_ficha_atual"))
         return
 
-    if estado_atual == "aguardando_confirmacao_geracao":
+    if est.startswith("criando_ficha"):
+        _conversar_com_ia(telefone, texto, assinante)
+        return
+
+    if est == "aguardando_confirmacao_geracao":
         _fluxo_confirmacao_geracao(telefone, texto, estado, assinante)
         return
 
-    if estado_atual in ("oferecendo_pdf", "aguardando_decisao_ficha_operacional"):
-        _fluxo_oferecendo_pdf(telefone, texto, estado, assinante)
+    if est in ("oferecendo_pdf", "aguardando_decisao_ficha_operacional"):
+        _fluxo_decisao_ficha_operacional(telefone, texto, estado, assinante)
         return
 
-    if estado_atual in ("coletando_foto_preparo", "aguardando_foto_operacional", "aguardando_modo_preparo_operacional"):
+    if est in ("coletando_foto_preparo", "aguardando_foto_operacional", "aguardando_modo_preparo_operacional"):
         _fluxo_coletando_foto_preparo(telefone, texto, estado, assinante)
         return
 
-    # â”€â”€ Estado geral: conversa com a IA â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     _conversar_com_ia(telefone, texto, assinante)
 
+# ── FLUXO PRÉ-ASSINATURA ─────────────────────────────────────────────────────
 
-# â”€â”€ FLUXO DE BOAS-VINDAS (primeiro contato / cadastro) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+def _verificar_cupom(telefone: str, texto: str, estado: dict) -> bool:
+    """Verifica se o texto contém um cupom válido. Se sim, salva no estado e avisa o user."""
+    from painel.models import Cupom
+    texto_limpo = texto.strip().upper()
+    cupom = Cupom.validar(texto_limpo)
+    if cupom:
+        dados = estado.get("dados", {})
+        dados["cupom_codigo"] = cupom.codigo
+        dados["cupom_valor"] = float(cupom.valor_primeiro_pagamento)
+        banco.set_estado(telefone, estado["estado"], dados)
+        whatsapp.enviar_texto(telefone, _msg("cupom_aplicado",
+            codigo=cupom.codigo,
+            valor=f"{cupom.valor_primeiro_pagamento:.2f}",
+            valor_normal=f"{config.PLANO_VALOR:.2f}"))
+        logger.info(f"[Cupom] {cupom.codigo} aplicado para {telefone} — R$ {cupom.valor_primeiro_pagamento}")
+        return True
+    return False
 
 
-def _conversar_onboarding(telefone: str, texto: str, assinante: dict):
+def _fluxo_pre_assinatura(telefone: str, texto: str, texto_lower: str, estado: dict) -> None:
     """
-    Conduz a coleta de dados do onboarding usando Tool Isolation.
-    A unica tool permitida nesse fluxo e concluir_coleta_dados.
+    Fluxo completo para quem ainda não assinou:
+    boas-vindas → demo por nicho → oferta → coleta dados → pagamento
     """
-    onboarding_prompt = (
-        "Você é o recepcionista do Mindnutri. Seu único objetivo é coletar 3 dados do usuário: "
-        "Nome, CPF e @ do Instagram. Seja educado, acolhedor e direto. "
-        "Se o usuário já informou algum dado na mensagem, absorva-o e peça apenas o que falta. "
-        "Quando tiver os 3 dados confirmados, você DEVE OBRIGATORIAMENTE chamar a função "
-        "'concluir_coleta_dados'."
-    )
+    est = estado["estado"]
 
-    historico = banco.get_historico(telefone, limite=20)
+    # Detectar cupom em qualquer estado do onboarding (exceto inicio)
+    if est not in ("inicio", "") and _verificar_cupom(telefone, texto, estado):
+        return
+
+    # Primeiro contato ou estado inicial
+    if est in ("inicio", ""):
+        _iniciar_boas_vindas(telefone)
+        return
+
+    # Aguardando escolha de nicho para o exemplo
+    if est == "aguardando_nicho_demo":
+        _enviar_exemplo_por_nicho(telefone, texto)
+        banco.set_estado(telefone, "aguardando_interesse", {})
+        whatsapp.enviar_texto(telefone, _msg("interesse_pos_demo"))
+        return
+
+    # Aguardando resposta de interesse após demo
+    if est == "aguardando_interesse":
+        if any(w in texto_lower for w in ("sim", "quero", "gostei", "interessei", "claro", "bora", "vamos", "show", "top", "saber", "mais", "conta")):
+            banco.set_estado(telefone, "aguardando_decisao_assinar", {})
+            whatsapp.enviar_texto(telefone, _msg("oferta_pos_demo", valor=f"{config.PLANO_VALOR:.2f}"))
+        else:
+            whatsapp.enviar_texto(telefone, _msg("nao_tem_interesse"))
+            banco.set_estado(telefone, "inicio", {})
+        return
+
+    # Aguardando decisão de assinar
+    if est == "aguardando_decisao_assinar":
+        if any(w in texto_lower for w in ("assinar", "sim", "quero", "pagar", "contratar")):
+            banco.set_estado(telefone, "coletando_dados", {})
+            _conversar_coleta_dados(telefone, texto, estado)
+        else:
+            whatsapp.enviar_texto(telefone, _msg("nao_quer_assinar"))
+        return
+
+    # Coletando dados via LLM (Nome, CPF, Instagram)
+    if est == "coletando_dados":
+        _conversar_coleta_dados(telefone, texto, estado)
+        return
+
+    # Escolha do método de pagamento
+    if est == "escolha_pagamento_assinatura":
+        metodo = _interpretar_metodo_pagamento(texto)
+        if not metodo:
+            _pedir_metodo_pagamento(telefone, "escolha_pagamento_assinatura",
+                "Não entendi o método. Pode repetir?")
+            return
+        _iniciar_assinatura(telefone, metodo, estado.get("dados", {}))
+        return
+
+    # Aguardando confirmação de pagamento
+    if est == "aguardando_pagamento":
+        metodo_trocado = _interpretar_metodo_pagamento(texto)
+        if metodo_trocado:
+            whatsapp.enviar_texto(telefone, _msg("troca_metodo_pagamento", metodo=metodo_trocado.upper()))
+            _iniciar_assinatura(telefone, metodo_trocado, estado.get("dados", {}))
+            return
+        if any(c in texto_lower for c in ("mudar", "trocar", "alterar", "outro")):
+            _pedir_metodo_pagamento(telefone, "escolha_pagamento_assinatura",
+                "Qual método você prefere agora?")
+            return
+        # Reenviar link se pedido
+        if any(c in texto_lower for c in ("link", "manda", "enviar", "reenviar", "pagar", "cade", "cadê")):
+            metodo_atual = estado.get("dados", {}).get("metodo_pagamento", "cartao")
+            _iniciar_assinatura(telefone, metodo_atual, estado.get("dados", {}))
+            return
+        whatsapp.enviar_texto(telefone, _msg("aguardando_pagamento"))
+        return
+
+    # Fallback: reinicia
+    _iniciar_boas_vindas(telefone)
+
+
+def _conversar_coleta_dados(telefone: str, texto: str, estado: dict) -> None:
+    """
+    Usa LLM para coletar Nome, CPF e Instagram de forma conversacional.
+    Quando todos os dados estiverem confirmados, avança para pagamento.
+    """
+    prompt_coleta = _msg("prompt_coleta")
+
+    historico = banco.get_historico(telefone, limite=10)
     banco.salvar_mensagem(telefone, "user", texto)
 
-    mensagens_openai = [{"role": "system", "content": onboarding_prompt}] + historico + [{"role": "user", "content": texto}]
+    mensagens = [{"role": "system", "content": prompt_coleta}] + historico + [{"role": "user", "content": texto}]
 
-    tools = [
-        {
-            "type": "function",
-            "function": {
-                "name": "concluir_coleta_dados",
-                "description": "Conclui o onboarding apos coletar nome, cpf e instagram.",
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "nome": {"type": "string"},
-                        "cpf": {"type": "string"},
-                        "instagram": {"type": "string"},
-                    },
-                    "required": ["nome", "cpf", "instagram"],
+    tools = [{
+        "type": "function",
+        "function": {
+            "name": "concluir_coleta_dados",
+            "description": "Conclui o cadastro após coletar nome, cpf e instagram.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "nome":      {"type": "string"},
+                    "cpf":       {"type": "string"},
+                    "instagram": {"type": "string"},
                 },
+                "required": ["nome", "cpf", "instagram"],
             },
-        }
-    ]
+        },
+    }]
 
     try:
-        modelo_escolhido = getattr(config, "OPENAI_MODEL", "gpt-4o")
+        modelo = getattr(config, "OPENAI_MODEL", "gpt-4o")
         resposta = _gpt.chat.completions.create(
-            model=modelo_escolhido,
-            messages=mensagens_openai,
+            model=modelo,
+            messages=mensagens,
             tools=tools,
         )
-
         message = resposta.choices[0].message
 
         if message.content and message.content.strip():
-            texto_resposta = message.content.strip()
-            banco.salvar_mensagem(telefone, "assistant", texto_resposta)
-            whatsapp.enviar_texto(telefone, texto_resposta)
+            banco.salvar_mensagem(telefone, "assistant", message.content.strip())
+            whatsapp.enviar_texto(telefone, message.content.strip())
 
         if message.tool_calls:
-            for tool_call in message.tool_calls:
-                if tool_call.function.name != "concluir_coleta_dados":
+            for tc in message.tool_calls:
+                if tc.function.name != "concluir_coleta_dados":
                     continue
-
                 try:
-                    args = json.loads(tool_call.function.arguments or "{}")
+                    args = json.loads(tc.function.arguments or "{}")
                 except json.JSONDecodeError:
-                    whatsapp.enviar_texto(
-                        telefone,
-                        "Nao consegui confirmar seus dados. Pode reenviar nome, CPF e Instagram em uma unica mensagem?",
-                    )
+                    whatsapp.enviar_texto(telefone, _msg("dados_coleta_erro"))
                     return
 
-                nome = (args.get("nome") or "").strip()
-                cpf = re.sub(r"\\D", "", args.get("cpf") or "")
+                nome      = (args.get("nome") or "").strip()
+                cpf       = re.sub(r"\D", "", args.get("cpf") or "")
                 instagram = (args.get("instagram") or "").strip()
 
                 if not (nome and cpf and instagram):
-                    whatsapp.enviar_texto(
-                        telefone,
-                        "Perfeito, ja anotei parte dos dados. Me envie o que faltou: nome completo, CPF e @ do Instagram.",
-                    )
+                    whatsapp.enviar_texto(telefone, _msg("dados_coleta_quase_la"))
                     return
 
-                if instagram.lower() in ("nao", "não", "n", "nenhum", "nao tenho", "não tenho", "nao tem", "não tem"):
+                if instagram.lower() in ("nao", "não", "n", "nenhum", "nao tenho", "não tenho"):
                     instagram = "NAO"
                 elif not instagram.startswith("@"):
                     instagram = "@" + instagram.lstrip("@")
 
-                banco.salvar_mensagem(telefone, "system", "[Coleta concluída]")
-                banco.atualizar_assinante(telefone, nome=nome, cpf=cpf, instagram=instagram)
-                banco.set_estado(telefone, "demonstracao_escolha_nicho", {})
+                # Salva dados no estado para usar em _iniciar_assinatura
+                dados_cadastro = {"nome": nome, "cpf": cpf, "instagram": instagram}
+                banco.set_estado(telefone, "escolha_pagamento_assinatura", dados_cadastro)
+                banco.salvar_mensagem(telefone, "system", "[Dados coletados]")
 
-                whatsapp.enviar_texto(
-                    telefone,
-                    f"Prazer em te conhecer, {nome}! 🎉\n\n"
-                    "Quer ver um exemplo grátis do que consigo fazer antes de assinar?\n\n"
-                    "Escolha um nicho:\n"
-                    "1️⃣ Hambúrguer\n"
-                    "2️⃣ Pizza\n"
-                    "3️⃣ Sobremesa",
-                )
+                whatsapp.enviar_texto(telefone, _msg("dados_coletados_pagamento", nome=nome))
                 return
 
         if not message.content and not message.tool_calls:
-            whatsapp.enviar_texto(
-                telefone,
-                "Estou aqui para te cadastrar rapidinho. Me diga seu nome, CPF e @ do Instagram.",
-            )
+            whatsapp.enviar_texto(telefone, _msg("dados_coleta_vazio"))
 
     except Exception as e:
-        safe_msg = repr(e).encode("utf-8", "ignore").decode("utf-8")
-        logging.error(f"[Onboarding] Erro OpenAI: {safe_msg}")
-        whatsapp.enviar_texto(
-            telefone,
-            "Tive uma instabilidade rapida aqui. Pode me enviar seu nome, CPF e Instagram novamente?",
-        )
-def _fluxo_boas_vindas(telefone: str, texto: str, estado: dict, assinante: dict):
-    """
-    Fluxo de primeiro contato (pendente):
-    - onboarding inteligente via LLM + tool isolation
-    - demonstracao
-    - oferta de assinatura
-    """
-    est = estado["estado"]
-    print(f"[Boas-vindas] {telefone}: estado='{est}', texto='{texto}'")
-
-    if est in ("inicio", "boas_vindas_inicio", "coletando_nome", "coletando_cpf", "coletando_instagram", "demonstracao_inicio"):
-        _conversar_onboarding(telefone, texto, assinante)
-        return
-
-    # Mantem a logica posterior de demonstracao e assinatura
-    if est == "demonstracao_escolha_nicho":
-        _enviar_exemplo_por_nicho(telefone, texto)
-        banco.set_estado(telefone, "demonstracao_pos_exemplo", {})
-        return
-
-    if est == "demonstracao_pos_exemplo":
-        banco.set_estado(telefone, "demonstracao_assinar", {})
-        whatsapp.enviar_texto(telefone,
-            "Gostou? Com o Mindnutri voce cria fichas assim para todos os seus pratos, "
-            "com seus ingredientes, seus custos e sua marca.\n\n"
-            f"*Plano Mensal: R$ {config.PLANO_VALOR:.2f}/mes*\n"
-            "30 fichas por mes\n"
-            "XLSX + PDF profissionais\n"
-            "Calculo de custos instantaneo\n"
-            "Base de ingredientes sempre atualizada\n\n"
-            "Quer assinar agora?\n\n"
-            "Responda *ASSINAR* para receber o link de pagamento.")
-        return
-
-    if est == "demonstracao_assinar":
-        if any(w in texto.lower() for w in ("assinar", "sim", "quero", "pagar")):
-            _pedir_metodo_pagamento(
-                telefone,
-                "escolha_pagamento_assinatura",
-                "Perfeito! Como voce prefere pagar a assinatura?",
-            )
-        else:
-            whatsapp.enviar_texto(telefone,
-                "Sem problema! Quando quiser assinar, e so responder *ASSINAR*.")
-        return
-
-    if est == "escolha_pagamento_assinatura":
-        metodo = _interpretar_metodo_pagamento(texto)
-        if not metodo:
-            _pedir_metodo_pagamento(
-                telefone,
-                "escolha_pagamento_assinatura",
-                "Nao entendi o metodo de pagamento.",
-            )
-            return
-        _iniciar_assinatura(telefone, metodo)
-        return
-
-    if est == "aguardando_pagamento":
-        metodo_trocado = _interpretar_metodo_pagamento(texto)
-        print(
-            f"[Pagamento] {telefone}: aguardando_pagamento texto='{texto}' -> metodo_trocado='{metodo_trocado}'"
-        )
-        logging.info(
-            f"[Pagamento] telefone={telefone} estado=aguardando_pagamento texto={texto} metodo_trocado={metodo_trocado}"
-        )
-        if metodo_trocado:
-            whatsapp.enviar_texto(
-                telefone,
-                f"Perfeito, vou trocar seu pagamento para *{metodo_trocado.upper()}*.",
-            )
-            _iniciar_assinatura(telefone, metodo_trocado)
-            return
-
-        if any(chave in texto.lower() for chave in ("mudar", "trocar", "alterar", "outro metodo", "outro método")):
-            _pedir_metodo_pagamento(
-                telefone,
-                "escolha_pagamento_assinatura",
-                "Sem problema. Qual metodo voce prefere agora?",
-            )
-            return
-
-        whatsapp.enviar_texto(telefone,
-            "Ainda estamos aguardando a confirmacao do seu pagamento.\n\n"
-            "Assim que compensar, seu acesso e liberado automaticamente.\n\n"
-            "Se ja pagou e ainda nao foi liberado, aguarde alguns minutos.")
-        return
-
-    # Fallback seguro: mantem o usuario no onboarding ate concluir dados
-    _conversar_onboarding(telefone, texto, assinante)
-def _enviar_exemplo_por_nicho(telefone: str, texto: str):
+        logger.error(f"[Coleta dados] Erro: {e}")
+        whatsapp.enviar_texto(telefone, _msg("dados_coleta_instabilidade"))
+def _enviar_exemplo_por_nicho(telefone: str, texto: str) -> None:
     """Envia os arquivos de exemplo para o nicho escolhido."""
     texto_lower = texto.lower()
 
-    if "1" in texto or "hamburguer" in texto_lower or "hambÃºrguer" in texto_lower or "burger" in texto_lower:
+    if "1" in texto or "hamburguer" in texto_lower or "hambúrguer" in texto_lower or "burger" in texto_lower:
         nicho = "hamburguer"
     elif "2" in texto or "pizza" in texto_lower:
         nicho = "pizza"
     elif "3" in texto or "sobremesa" in texto_lower or "brownie" in texto_lower or "doce" in texto_lower:
         nicho = "sobremesa"
     else:
-        nicho = "hamburguer"  # default
+        nicho = "hamburguer"
 
-    whatsapp.enviar_texto(telefone,
-        f"Perfeito! Veja aqui um exemplo de ficha tÃ©cnica e ficha operacional "
-        f"para o segmento de *{nicho.capitalize()}*: ðŸ“‹")
+    nicho_label = nicho.capitalize()
+
+    whatsapp.enviar_texto(telefone, _msg("exemplo_nicho_intro", nicho_label=nicho_label))
 
     xlsx_path = EXEMPLOS_DIR / f"exemplo_{nicho}.xlsx"
     pdf_path  = EXEMPLOS_DIR / f"exemplo_{nicho}.pdf"
-
-    print(f"[Exemplos] EXEMPLOS_DIR resolvido para: {EXEMPLOS_DIR.resolve()}")
-    print(f"[Exemplos] xlsx_path={xlsx_path} existe={xlsx_path.exists()}")
-    print(f"[Exemplos] pdf_path={pdf_path} existe={pdf_path.exists()}")
 
     enviou_algo = False
 
     if xlsx_path.exists():
         whatsapp.enviar_arquivo(telefone, str(xlsx_path),
-            caption=f"Ficha TÃ©cnica â€” {nicho.capitalize()} (XLSX)")
+            caption=f"Ficha Técnica — {nicho_label} (XLSX)")
         enviou_algo = True
     else:
-        print(f"ERRO: Arquivo nÃ£o encontrado em {xlsx_path}")
-        logging.error(f"Arquivo de exemplo nÃ£o encontrado: {xlsx_path}")
+        logger.error(f"Arquivo de exemplo não encontrado: {xlsx_path}")
 
     if pdf_path.exists():
         whatsapp.enviar_arquivo(telefone, str(pdf_path),
-            caption=f"Ficha Operacional â€” {nicho.capitalize()} (PDF)")
+            caption=f"Ficha Operacional — {nicho_label} (PDF)")
         enviou_algo = True
     else:
-        print(f"ERRO: Arquivo nÃ£o encontrado em {pdf_path}")
-        logging.error(f"Arquivo de exemplo nÃ£o encontrado: {pdf_path}")
+        logger.error(f"Arquivo de exemplo não encontrado: {pdf_path}")
 
     if not enviou_algo:
-        whatsapp.enviar_texto(telefone,
-            "Opa, tive um problema tÃ©cnico ao buscar esse exemplo, "
-            "mas vocÃª pode assinar para testar com seus dados! ðŸš€\n\n"
-            "Responda *ASSINAR* para comeÃ§ar.")
+        whatsapp.enviar_texto(telefone, _msg("exemplo_nicho_erro"))
 
 
 def _interpretar_metodo_pagamento(texto: str) -> str | None:
@@ -469,34 +515,55 @@ def _normalizar_texto_pagamento(texto: str) -> str:
     return sem_acentos.lower().strip()
 
 
-def _pedir_metodo_pagamento(telefone: str, estado_destino: str, abertura: str):
+def _pedir_metodo_pagamento(telefone: str, estado_destino: str, abertura: str) -> None:
     banco.set_estado(telefone, estado_destino, {})
-    whatsapp.enviar_texto(
-        telefone,
-        f"{abertura}\n\n"
-        "1 Cartao de credito\n"
-        "Assinatura recorrente automatica, sem boleto.\n\n"
-        "2 Pix\n"
-        "Pagamento do ciclo atual via Pix, sem boleto.\n\n"
-        "Responda com *1*, *2*, *CARTAO* ou *PIX*.",
-    )
+    whatsapp.enviar_texto(telefone, _msg("pedir_metodo_pagamento", abertura=abertura))
 
 
-def _iniciar_assinatura(telefone: str, metodo: str):
-    """Gera o link conforme o metodo escolhido e envia ao cliente."""
-    print(f"[Asaas] Iniciando criaÃ§Ã£o de assinatura para {telefone}")
-    logging.info(f"[Asaas] Iniciando assinatura para {telefone} via {metodo}")
+def _iniciar_assinatura(telefone: str, metodo: str, dados_cadastro: dict = None) -> None:
+    """Cria o Assinante no banco (se ainda não existir), gera o link e envia ao cliente."""
+    logger.info(f"[Asaas] Iniciando assinatura para {telefone} via {metodo}")
+
+    # Cria o Assinante APENAS agora (na emissão do link de pagamento)
+    dados = dados_cadastro or {}
+    if not banco.get_assinante(telefone):
+        from painel.models import Assinante
+        Assinante.objects.get_or_create(
+            telefone=telefone,
+            defaults={
+                "nome":      dados.get("nome", ""),
+                "cpf":       dados.get("cpf", ""),
+                "instagram": dados.get("instagram", ""),
+                "status":    "pendente",
+            }
+        )
+    else:
+        if dados:
+            banco.atualizar_assinante(telefone,
+                nome=dados.get("nome", ""),
+                cpf=dados.get("cpf", ""),
+                instagram=dados.get("instagram", ""),
+            )
+
+    # Verificar se há cupom aplicado
+    cupom_codigo = dados.get("cupom_codigo")
+    cupom_valor = dados.get("cupom_valor")
+    valor_primeiro = float(cupom_valor) if cupom_valor else config.PLANO_VALOR
+
+    if cupom_codigo:
+        logger.info(f"[Cupom] Usando cupom {cupom_codigo} — primeiro pagamento R$ {valor_primeiro:.2f}")
+
     try:
         if metodo == "cartao":
             from utils.asaas import criar_link_assinatura_cartao
-            pagamento = criar_link_assinatura_cartao(telefone)
+            pagamento = criar_link_assinatura_cartao(telefone, valor_primeiro_pagamento=valor_primeiro)
             link = pagamento.get("url")
         else:
             from utils.asaas import criar_cobranca_pix
             pagamento = criar_cobranca_pix(
                 telefone,
-                config.PLANO_VALOR,
-                "Mindhub Mindnutri - Assinatura Mensal via Pix",
+                valor_primeiro,
+                f"Mindhub Mindnutri - Assinatura Mensal via Pix{' (cupom ' + cupom_codigo + ')' if cupom_codigo else ''}",
             )
             link = pagamento.get("invoice_url")
             codigo_pix = pagamento.get("pix_copy_paste", "")
@@ -507,117 +574,56 @@ def _iniciar_assinatura(telefone: str, metodo: str):
         dados_estado = {"metodo_pagamento": metodo}
         if metodo == "cartao":
             dados_estado["payment_link_id"] = pagamento.get("payment_link_id", "")
-            whatsapp.enviar_texto(
-                telefone,
-                "Perfeito! Aqui esta seu link de pagamento em *cartao de credito*.\n\n"
-                f"ðŸ”— {link}\n\n"
-                "Esse fluxo ativa a *assinatura mensal automatica* do Mindnutri. "
-                "Assim que o pagamento for aprovado, seu acesso sera liberado automaticamente.",
-            )
+            whatsapp.enviar_texto(telefone, _msg("link_cartao", link=link))
         else:
             dados_estado["payment_id"] = pagamento.get("payment_id", "")
-            mensagem_pix = (
-                "Perfeito! Aqui esta seu link de pagamento em *Pix*.\n\n"
-                f"ðŸ”— {link}\n\n"
-            )
-            if codigo_pix:
-                mensagem_pix += f"Codigo Pix copia e cola:\n{codigo_pix}\n\n"
-            mensagem_pix += (
-                "Assim que o pagamento for confirmado, seu acesso sera liberado automaticamente. "
-                "Nas renovacoes via Pix, o pagamento segue manual a cada ciclo."
-            )
-            whatsapp.enviar_texto(telefone, mensagem_pix)
+            bloco_pix = f"Código Pix copia e cola:\n{codigo_pix}\n\n" if codigo_pix else ""
+            whatsapp.enviar_texto(telefone, _msg("link_pix", link=link, bloco_codigo_pix=bloco_pix))
 
-        banco.set_estado(telefone, "aguardando_pagamento", dados_estado)
-        return
+        # Registrar uso do cupom
+        if cupom_codigo:
+            from painel.models import Cupom
+            cupom_obj = Cupom.validar(cupom_codigo)
+            if cupom_obj:
+                cupom_obj.usar()
+            dados_estado["cupom_codigo"] = cupom_codigo
 
-        whatsapp.enviar_texto(telefone,
-            f"Ã“timo! Aqui estÃ¡ seu link de pagamento:\n\n"
-            f"ðŸ”— {link}\n\n"
-            f"ApÃ³s o pagamento ser confirmado, seu acesso Ã© ativado automaticamente "
-            f"e vamos comeÃ§ar a criar suas fichas! ðŸŽ‰")
-
-        dados_estado = {"metodo_pagamento": metodo}
-        if metodo == "cartao":
-            dados_estado["payment_link_id"] = pagamento.get("payment_link_id", "")
-        else:
-            dados_estado["payment_id"] = pagamento.get("payment_id", "")
         banco.set_estado(telefone, "aguardando_pagamento", dados_estado)
 
     except Exception as e:
-        # Log completo para o terminal e ficheiro
-        print(f"ERRO ASAAS DETALHADO: {str(e)}")
-        logging.error(f"ERRO ASAAS DETALHADO: {str(e)}")
+        logger.error(f"ERRO ASAAS: {e}")
         if isinstance(e, requests.exceptions.HTTPError) and hasattr(e, 'response') and e.response is not None:
-            print(f"ERRO ASAAS RESPONSE BODY: {e.response.text}")
-            logging.error(f"ERRO ASAAS RESPONSE BODY: {e.response.text}")
-        logging.error(traceback.format_exc())
+            logger.error(f"ASAAS RESPONSE: {e.response.text}")
 
         erro_body = e.response.text if isinstance(e, requests.exceptions.HTTPError) and hasattr(e, 'response') and e.response is not None else ""
         if metodo == "pix" and "Pix" in erro_body:
-            whatsapp.enviar_texto(
-                telefone,
-                "O Pix ainda nao esta habilitado nesta conta do Asaas.\n\n"
-                "Enquanto isso, eu consigo te enviar o link em *cartao de credito* sem boleto. "
-                "Responda *CARTAO* para continuar.",
-            )
-            banco.set_estado(telefone, "escolha_pagamento_assinatura", {})
+            whatsapp.enviar_texto(telefone, _msg("pix_nao_habilitado"))
+            banco.set_estado(telefone, "escolha_pagamento_assinatura", dados_cadastro or {})
             return
 
-        whatsapp.enviar_texto(telefone,
-            "Desculpe, tive um problema tÃ©cnico ao gerar seu link de pagamento. ðŸ˜”\n\n"
-            "Por favor, entre em contato com o suporte da Mindhub para completar sua assinatura:\n"
-            f"ðŸ“± WhatsApp: {config.GESTOR_WHATSAPP}\n\n"
-            "Enquanto isso, responda *ASSINAR* para tentar novamente!")
+        whatsapp.enviar_texto(telefone, _msg("erro_asaas_generico", gestor_whatsapp=config.GESTOR_WHATSAPP))
 
-        # Alerta para o gestor
         if config.GESTOR_WHATSAPP:
-            whatsapp.enviar_texto(config.GESTOR_WHATSAPP,
-                f"ðŸš¨ *Alerta Mindnutri â€” Asaas Falhou*\n\n"
-                f"Cliente {telefone} tentou assinar mas o Asaas retornou erro:\n"
-                f"{str(e)[:200]}\n\n"
-                f"Verifique a integraÃ§Ã£o.")
-
-        # NÃƒO muda estado â€” mantÃ©m em demonstracao_assinar para retry
-        return
-
-
+            whatsapp.enviar_texto(config.GESTOR_WHATSAPP, _msg("alerta_gestor_asaas", telefone=telefone, erro=str(e)[:200]))
 # â”€â”€ MENU PRINCIPAL â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
-def _enviar_menu_principal(telefone: str, assinante: dict):
+def _enviar_menu_principal(telefone: str, assinante: dict) -> None:
     nome = assinante.get("nome") or "cliente"
     fichas_rest = assinante["fichas_limite_mes"] - assinante["fichas_geradas_mes"]
-    whatsapp.enviar_texto(telefone,
-        f"OlÃ¡, {nome}! ðŸ‘‹ Como posso te ajudar hoje?\n\n"
-        f"ðŸ“‹ *1* â€” Criar ficha tÃ©cnica (XLSX)\n"
-        f"ðŸ“„ *2* â€” Criar ficha operacional (PDF)\n"
-        f"ðŸ’° *3* â€” Calcular custo rÃ¡pido de um prato\n"
-        f"ðŸ“¦ *4* â€” Ver meus ingredientes cadastrados\n\n"
-        f"Fichas disponÃ­veis este mÃªs: *{fichas_rest}/30*\n\n"
-        "Responda com o nÃºmero ou descreva o que precisa!")
+    whatsapp.enviar_texto(telefone, _msg("menu_principal", nome=nome, fichas_rest=fichas_rest))
 
 
-# â”€â”€ FLUXO PRINCIPAL DE CRIAÃ‡ÃƒO DE FICHA â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
-def _fluxo_criacao_ficha(telefone: str, texto: str, estado: dict, assinante: dict):
-    """
-    Delega toda a lÃ³gica de criaÃ§Ã£o de ficha para a IA,
-    mantendo contexto via histÃ³rico de conversa.
-    """
-    _conversar_com_ia(telefone, texto, assinante)
-
-
-def _fluxo_confirmacao_geracao(telefone: str, texto: str, estado: dict, assinante: dict):
-    """Aguarda confirmaÃ§Ã£o do cliente para gerar o arquivo."""
-    if any(p in texto.lower() for p in ["sim", "gera", "pode", "ok", "yes", "confirma", "ðŸ‘"]):
+def _fluxo_confirmacao_geracao(telefone: str, texto: str, estado: dict, assinante: dict) -> None:
+    """Aguarda confirmação do cliente para gerar o arquivo."""
+    if any(p in texto.lower() for p in ["sim", "gera", "pode", "ok", "yes", "confirma", "👍"]):
         dados = estado.get("dados", {})
         tipo  = dados.get("tipo_geracao", "tecnica")
         _gerar_e_enviar_arquivo(telefone, dados, tipo, assinante)
         banco.resetar_estado(telefone)
     else:
         banco.resetar_estado(telefone)
-        whatsapp.enviar_texto(telefone,
-            "Ok, cancelei a geraÃ§Ã£o. Se quiser ajustar algo, Ã© sÃ³ me dizer! ðŸ˜Š")
+        whatsapp.enviar_texto(telefone, _msg("cancelei_geracao"))
 
 
 def _eh_resposta_sim(texto: str) -> bool:
@@ -631,21 +637,44 @@ def _eh_resposta_nao(texto: str) -> bool:
 
 
 def _normalizar_lista_modo_preparo(texto: str) -> list[str]:
+    """
+    Normaliza texto de modo de preparo em lista de passos.
+    Aceita: linhas separadas, numeração, ponto-e-vírgula, ou texto corrido com frases.
+    Cada passo lógico completo vira um item.
+    """
     bruto = (texto or "").strip()
     if not bruto:
         return []
 
+    # Se é uma lista (da IA), já vem ok
+    if isinstance(texto, list):
+        return [str(p).strip() for p in texto if str(p).strip()]
+
+    # Separar por quebras de linha
     linhas = [l.strip(" -•\t") for l in bruto.splitlines() if l.strip()]
+
+    # Se veio tudo numa linha só, tentar separar por ponto-e-vírgula ou por sentenças
     if len(linhas) == 1:
-        linhas = [p.strip() for p in re.split(r";\s*", linhas[0]) if p.strip()]
+        # Tentar ponto-e-vírgula primeiro
+        partes_pv = [p.strip() for p in re.split(r";\s*", linhas[0]) if p.strip()]
+        if len(partes_pv) > 1:
+            linhas = partes_pv
+        else:
+            # Separar por frases (ponto final seguido de maiúscula ou número)
+            partes = re.split(r"(?<=\.)\s+(?=[A-ZÁÉÍÓÚÂÊÔÃÕÇ\d])", linhas[0])
+            if len(partes) > 1:
+                linhas = [p.strip() for p in partes if p.strip()]
 
     if not linhas:
         return []
 
     passos = []
     for linha in linhas:
+        # Remover numeração inicial (1. 2) 3- etc.)
         passo = re.sub(r"^\d+[\)\.\-:\s]+", "", linha).strip()
         if passo:
+            # Capitalizar primeira letra
+            passo = passo[0].upper() + passo[1:] if len(passo) > 1 else passo.upper()
             passos.append(passo)
     return passos
 
@@ -654,25 +683,36 @@ def _salvar_foto_prato_operacional(telefone: str, midia_bytes: bytes) -> str | N
     try:
         nome_foto = f"foto_prato_{datetime.now().strftime('%Y%m%d_%H%M%S')}.jpg"
         caminho = storage.salvar_arquivo(telefone, nome_foto, dados=midia_bytes)
-        print(f"[Fluxo PDF] Foto salva em: {caminho}")
+        logger.debug(f"[Fluxo PDF] Foto salva em: {caminho}")
         return caminho
     except Exception as e:
-        print(f"[Fluxo PDF] Falha ao salvar foto do prato: {e}")
+        logger.error(f"[Fluxo PDF] Falha ao salvar foto do prato: {e}")
         return None
 
 
-def _formatar_qtd_operacional(valor, unidade: str) -> str:
+def _formatar_qtd_operacional(valor: float | str, unidade: str) -> str:
     try:
         num = float(valor)
-        if num.is_integer():
-            txt = str(int(num))
-        else:
-            txt = f"{num:.3f}".rstrip("0").rstrip(".")
-    except Exception:
-        txt = str(valor or "").strip()
+    except (ValueError, TypeError):
+        return f"{str(valor or '').strip()} {(unidade or '').strip()}".strip()
 
-    unidade_limpa = (unidade or "").strip()
-    return f"{txt} {unidade_limpa}".strip()
+    unidade_limpa = (unidade or "").strip().lower()
+
+    # Converter kg → g quando abaixo de 1kg
+    if unidade_limpa == "kg" and num < 1:
+        num = round(num * 1000)
+        unidade_limpa = "g"
+    # Converter L → ml quando abaixo de 1L
+    elif unidade_limpa in ("l", "litro", "litros") and num < 1:
+        num = round(num * 1000)
+        unidade_limpa = "ml"
+
+    if isinstance(num, float) and num.is_integer():
+        txt = str(int(num))
+    else:
+        txt = f"{num:.3f}".rstrip("0").rstrip(".") if isinstance(num, float) else str(num)
+
+    return f"{txt}{unidade_limpa}".strip()
 
 
 def _montar_ingredientes_operacionais(dados: dict) -> list[dict]:
@@ -700,96 +740,91 @@ def _montar_dados_operacionais(dados_tecnica: dict, foto_path: str = "", modo_pr
     return dados_pdf
 
 
-def _iniciar_fluxo_pos_coleta_tecnica(telefone: str, dados_tecnica: dict):
+def _iniciar_fluxo_pos_coleta_tecnica(telefone: str, dados_tecnica: dict) -> None:
+    """
+    Dados coletados pela IA. Pergunta se quer PDF operacional.
+    - SIM → coleta foto + modo de preparo → gera EXCEL + PDF juntos (combo)
+    - NÃO → gera só o EXCEL
+    """
     dados_fluxo = {
         "tecnica_dados": dados_tecnica,
         "modo_preparo": dados_tecnica.get("modo_preparo", []),
         "foto_path": "",
     }
     banco.set_estado(telefone, "aguardando_decisao_ficha_operacional", dados_fluxo)
-    whatsapp.enviar_texto(
-        telefone,
-        "Deseja gerar também a Ficha Operacional ilustrada em PDF para sua cozinha?",
-    )
-    print(f"[Fluxo PDF] Pergunta de complemento enviada para {telefone}")
+    whatsapp.enviar_texto(telefone, _msg("pergunta_ficha_operacional"))
+    logger.debug(f"[Fluxo] Pergunta sobre PDF enviada para {telefone}")
 
 
-def _finalizar_fluxo_geracao_integrada(telefone: str, fluxo: dict, assinante: dict):
+def _finalizar_fluxo_geracao_integrada(telefone: str, fluxo: dict, assinante: dict) -> None:
+    """
+    Gera os arquivos finais:
+    - gerar_operacional=True  → combo (XLSX + PDF juntos)
+    - gerar_operacional=False → só XLSX
+    """
     dados_tecnica = dict(fluxo.get("tecnica_dados") or {})
     gerar_operacional = bool(fluxo.get("gerar_operacional"))
 
     if gerar_operacional:
+        # Combo: gera XLSX + PDF juntos
         dados_combo = _montar_dados_operacionais(
             dados_tecnica,
             foto_path=fluxo.get("foto_path", ""),
             modo_preparo=fluxo.get("modo_preparo") or dados_tecnica.get("modo_preparo", []),
         )
-        print(f"[Fluxo PDF] Gerando combo tecnica+operacional para {telefone}")
+        logger.info(f"[Fluxo] Gerando combo XLSX+PDF para {telefone}")
         _gerar_e_enviar_arquivo(telefone, dados_combo, "combo", assinante)
     else:
-        print(f"[Fluxo PDF] Gerando somente ficha tecnica para {telefone}")
+        # Só Excel
+        logger.info(f"[Fluxo] Gerando somente XLSX para {telefone}")
         _gerar_e_enviar_arquivo(telefone, dados_tecnica, "tecnica", assinante)
 
     banco.resetar_estado(telefone)
 
 
-def _avancar_coleta_operacional(telefone: str, fluxo: dict, assinante: dict):
+def _avancar_coleta_operacional(telefone: str, fluxo: dict, assinante: dict) -> None:
     foto_path = (fluxo.get("foto_path") or "").strip()
-    modo_preparo = fluxo.get("modo_preparo") or []
+    modo_preparo = fluxo.get("modo_preparo") or fluxo.get("tecnica_dados", {}).get("modo_preparo", [])
 
     if not foto_path:
         banco.set_estado(telefone, "aguardando_foto_operacional", fluxo)
-        whatsapp.enviar_texto(
-            telefone,
-            "Perfeito! Me envie agora a foto do prato para montar a ficha operacional ilustrada.",
-        )
-        print(f"[Fluxo PDF] Aguardando foto do prato de {telefone}")
+        whatsapp.enviar_texto(telefone, _msg("aguardando_foto"))
+        logger.debug(f"[Fluxo PDF] Aguardando foto do prato de {telefone}")
         return
 
     if not modo_preparo:
         banco.set_estado(telefone, "aguardando_modo_preparo_operacional", fluxo)
-        whatsapp.enviar_texto(
-            telefone,
-            "Agora me envie o modo de preparo (passo a passo) para completar o PDF operacional.",
-        )
-        print(f"[Fluxo PDF] Aguardando modo de preparo de {telefone}")
+        whatsapp.enviar_texto(telefone, _msg("aguardando_modo_preparo"))
+        logger.debug(f"[Fluxo PDF] Aguardando modo de preparo de {telefone}")
         return
 
+    # Garantir que modo_preparo esteja no nível correto do fluxo
+    fluxo["modo_preparo"] = modo_preparo
     _finalizar_fluxo_geracao_integrada(telefone, fluxo, assinante)
 
 
-def _fluxo_decisao_ficha_operacional(telefone: str, texto: str, estado: dict, assinante: dict):
+def _fluxo_decisao_ficha_operacional(telefone: str, texto: str, estado: dict, assinante: dict) -> None:
     fluxo = estado.get("dados", {})
 
     if _eh_resposta_sim(texto):
         fluxo["gerar_operacional"] = True
         fluxo["modo_preparo"] = fluxo.get("modo_preparo") or fluxo.get("tecnica_dados", {}).get("modo_preparo", [])
         banco.set_estado(telefone, "aguardando_decisao_ficha_operacional", fluxo)
-        print(f"[Fluxo PDF] Cliente {telefone} optou por gerar PDF operacional.")
+        logger.info(f"[Fluxo PDF] Cliente {telefone} optou por gerar PDF operacional.")
         _avancar_coleta_operacional(telefone, fluxo, assinante)
         return
 
     if _eh_resposta_nao(texto):
         fluxo["gerar_operacional"] = False
-        whatsapp.enviar_texto(telefone, "Perfeito! Vou gerar agora somente a Ficha Tecnica em Excel.")
-        print(f"[Fluxo PDF] Cliente {telefone} optou por gerar somente tecnica.")
+        whatsapp.enviar_texto(telefone, _msg("somente_tecnica"))
+        logger.info(f"[Fluxo PDF] Cliente {telefone} optou por gerar somente tecnica.")
         _finalizar_fluxo_geracao_integrada(telefone, fluxo, assinante)
         return
 
-    whatsapp.enviar_texto(
-        telefone,
-        "Me confirma com *SIM* para gerar o PDF operacional tambem, ou *NAO* para seguir apenas com o Excel.",
-    )
+    whatsapp.enviar_texto(telefone, _msg("confirmar_sim_nao_pdf"))
 
 
-def _fluxo_oferecendo_pdf(telefone: str, texto: str, estado: dict, assinante: dict):
-    """
-    Compatibilidade de estado: delega para o fluxo legado de decisao do PDF.
-    """
-    _fluxo_decisao_ficha_operacional(telefone, texto, estado, assinante)
-
-
-def _fluxo_coletando_foto_preparo(telefone: str, texto: str, estado: dict, assinante: dict):
+def _fluxo_coletando_foto_preparo(telefone: str, texto: str, estado: dict, assinante: dict) -> None:
     """
     Compatibilidade de estado:
     - aceita foto ou texto na mesma etapa;
@@ -816,54 +851,50 @@ def _fluxo_coletando_foto_preparo(telefone: str, texto: str, estado: dict, assin
     _fluxo_coleta_foto_operacional(telefone, texto, estado, assinante)
 
 
-def _fluxo_coleta_foto_operacional(telefone: str, texto: str, estado: dict, assinante: dict):
+def _fluxo_coleta_foto_operacional(telefone: str, texto: str, estado: dict, assinante: dict) -> None:
     fluxo = estado.get("dados", {})
     texto_limpo = (texto or "").strip()
 
     if texto_limpo.startswith("[FOTO_PRATO]"):
         fluxo["foto_path"] = texto_limpo.replace("[FOTO_PRATO]", "", 1).strip()
         banco.set_estado(telefone, "aguardando_foto_operacional", fluxo)
-        whatsapp.enviar_texto(telefone, "Foto recebida com sucesso! ✅")
+        whatsapp.enviar_texto(telefone, _msg("foto_recebida"))
         _avancar_coleta_operacional(telefone, fluxo, assinante)
         return
 
     if any(p in texto_limpo.lower() for p in ("sem foto", "pular foto", "nao tenho foto", "não tenho foto")):
         fluxo["foto_path"] = ""
-        banco.set_estado(telefone, "aguardando_foto_operacional", fluxo)
-        whatsapp.enviar_texto(
-            telefone,
-            "Sem problemas. Podemos seguir sem foto, mas o PDF fica melhor com imagem. Me envie o modo de preparo.",
-        )
-        fluxo["modo_preparo"] = fluxo.get("modo_preparo") or []
-        banco.set_estado(telefone, "aguardando_modo_preparo_operacional", fluxo)
+        whatsapp.enviar_texto(telefone, _msg("sem_foto_seguir"))
+        # Se já tem modo_preparo (vindo da ficha técnica), gera direto
+        modo_preparo = fluxo.get("modo_preparo") or fluxo.get("tecnica_dados", {}).get("modo_preparo", [])
+        if modo_preparo:
+            fluxo["modo_preparo"] = modo_preparo
+            _finalizar_fluxo_geracao_integrada(telefone, fluxo, assinante)
+        else:
+            banco.set_estado(telefone, "aguardando_modo_preparo_operacional", fluxo)
+            whatsapp.enviar_texto(telefone, _msg("aguardando_modo_preparo"))
         return
 
-    whatsapp.enviar_texto(
-        telefone,
-        "Ainda preciso da foto do prato. Envie uma imagem para continuar.",
-    )
+    whatsapp.enviar_texto(telefone, _msg("foto_ainda_necessaria"))
 
 
-def _fluxo_coleta_modo_preparo_operacional(telefone: str, texto: str, estado: dict, assinante: dict):
+def _fluxo_coleta_modo_preparo_operacional(telefone: str, texto: str, estado: dict, assinante: dict) -> None:
     fluxo = estado.get("dados", {})
     passos = _normalizar_lista_modo_preparo(texto)
 
     if not passos:
-        whatsapp.enviar_texto(
-            telefone,
-            "Nao consegui identificar o passo a passo. Pode enviar o modo de preparo em texto (um passo por linha)?",
-        )
+        whatsapp.enviar_texto(telefone, _msg("modo_preparo_nao_identificado"))
         return
 
     fluxo["modo_preparo"] = passos
     banco.set_estado(telefone, "aguardando_modo_preparo_operacional", fluxo)
-    print(f"[Fluxo PDF] Modo de preparo recebido ({len(passos)} passos) para {telefone}")
+    logger.debug(f"[Fluxo PDF] Modo de preparo recebido ({len(passos)} passos) para {telefone}")
     _finalizar_fluxo_geracao_integrada(telefone, fluxo, assinante)
 
 
 # â”€â”€ CONVERSA COM IA â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
-def _conversar_com_ia(telefone: str, texto: str, assinante: dict):
+def _conversar_com_ia(telefone: str, texto: str, assinante: dict) -> None:
     """
     Envia mensagem para a IA com todo o contexto e retorna resposta.
     Detecta quando a IA quer gerar um arquivo.
@@ -879,17 +910,36 @@ def _conversar_com_ia(telefone: str, texto: str, assinante: dict):
     nomes_ing = [i["nome"] for i in ingredientes_cadastrados[:30]]
     fichas_rest = assinante["fichas_limite_mes"] - assinante["fichas_geradas_mes"]
 
+    # Carregar base de perdas para injetar no contexto da IA
+    from painel.models import PerdaIngrediente
+    try:
+        perdas_list = PerdaIngrediente.carregar_todas()
+        perdas_com_valor = [p for p in perdas_list if p["perda_percentual"] != 0]
+        perdas_texto = "\n".join(
+            f"- {p['nome']}: {'perde ' + str(p['perda_percentual']) + '%' if p['perda_percentual'] > 0 else 'ganha ' + str(abs(p['perda_percentual'])) + '% (absorve agua)'} ({p['tipo_perda']})"
+            for p in perdas_com_valor
+        )
+    except Exception as e:
+        logger.warning(f"[IA] Falha ao carregar base de perdas: {e}")
+        perdas_texto = ""
+
     contexto_extra = f"""
 CONTEXTO DO CLIENTE:
-- Nome: {assinante.get('nome', 'nÃ£o informado')}
-- Estabelecimento: {assinante.get('estabelecimento', 'nÃ£o informado')}
-- Nicho: {assinante.get('nicho', 'nÃ£o informado')}
-- Cidade: {assinante.get('cidade', 'nÃ£o informado')}
-- Fichas restantes este mÃªs: {fichas_rest}
-- Ingredientes jÃ¡ cadastrados: {', '.join(nomes_ing) if nomes_ing else 'nenhum ainda'}
+- Nome: {assinante.get('nome', 'nao informado')}
+- Estabelecimento: {assinante.get('estabelecimento', 'nao informado')}
+- Nicho: {assinante.get('nicho', 'nao informado')}
+- Cidade: {assinante.get('cidade', 'nao informado')}
+- Fichas restantes este mes: {fichas_rest}
+- Ingredientes ja cadastrados: {', '.join(nomes_ing) if nomes_ing else 'nenhum ainda'}
+
+BASE DE PERDAS PADRAO (use como referencia ao perguntar sobre perdas):
+{perdas_texto if perdas_texto else 'Nenhuma perda cadastrada.'}
 """
 
-    system_com_contexto = SYSTEM_PROMPT + "\n\n" + contexto_extra
+    from painel.models import ConfiguracaoIA
+    _cfg = ConfiguracaoIA.get_config()
+    _sys_prompt = _cfg.get_system_prompt() or SYSTEM_PROMPT
+    system_com_contexto = _sys_prompt + "\n\n" + contexto_extra
     
     # Prepara mensagens para OpenAI (System prompt embutido no histÃ³rico)
     mensagens_openai = [{"role": "system", "content": system_com_contexto}] + historico
@@ -991,7 +1041,7 @@ CONTEXTO DO CLIENTE:
         ]
 
         # ConfiguraÃ§Ã£o do modelo caso nÃ£o tenha sido migrada
-        modelo_escolhido = getattr(config, 'OPENAI_MODEL', 'gpt-4o')
+        modelo_escolhido = _cfg.modelo_ia or getattr(config, 'OPENAI_MODEL', 'gpt-4o')
 
         resposta = _gpt.chat.completions.create(
             model=modelo_escolhido,
@@ -1022,7 +1072,7 @@ CONTEXTO DO CLIENTE:
                 try:
                     tool_input = json.loads(tool_call.function.arguments)
                 except json.JSONDecodeError:
-                    print(f"Erro ao decodificar argumentos da funÃ§Ã£o {tool_name}")
+                    logger.error(f"Erro ao decodificar argumentos da função {tool_name}")
                     continue
 
                 if tool_name == "gerar_ficha_tecnica":
@@ -1067,32 +1117,25 @@ CONTEXTO DO CLIENTE:
 
     except Exception as e:
         safe_msg = repr(e).encode('utf-8', 'ignore').decode('utf-8')
-        print(f"[OpenAI] Erro: {safe_msg}")
-        logging.error(f"[OpenAI] Erro: {safe_msg}")
+        logger.error(f"[OpenAI] Erro: {safe_msg}")
         _registrar_falha(telefone, assinante)
 
 
 # â”€â”€ GERAÃ‡ÃƒO E ENVIO DE ARQUIVOS â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
-def _gerar_e_enviar_arquivo(telefone: str, dados: dict, tipo: str, assinante: dict):
+def _gerar_e_enviar_arquivo(telefone: str, dados: dict, tipo: str, assinante: dict) -> None:
     """Gera e envia arquivo(s). Se tipo='combo', gera XLSX+PDF com um unico consumo de credito."""
     nome_prato = dados.get("nome_prato", "preparo")
     nome_prato_limpo = str(nome_prato).strip()
 
     try:
         if tipo == "combo":
-            whatsapp.enviar_texto(
-                telefone,
-                f"⏳ Gerando sua Ficha Tecnica e a Ficha Operacional de *{nome_prato_limpo}*... aguarde um instante!",
-            )
+            whatsapp.enviar_texto(telefone, _msg("gerando_combo", nome_prato=nome_prato_limpo))
         else:
-            whatsapp.enviar_texto(
-                telefone,
-                f"⏳ Gerando sua ficha de *{nome_prato_limpo}*... aguarde um instante!",
-            )
+            whatsapp.enviar_texto(telefone, _msg("gerando_ficha", nome_prato=nome_prato_limpo))
 
         cobrar_credito = _deve_consumir_credito_por_prato(telefone, nome_prato_limpo)
-        print(f"[Credito] prato={nome_prato_limpo} cobrar_credito={cobrar_credito} tipo={tipo}")
+        logger.debug(f"[Credito] prato={nome_prato_limpo} cobrar_credito={cobrar_credito} tipo={tipo}")
 
         if tipo == "combo":
             caminho_tecnica = _gerar_enviar_registrar_arquivo(
@@ -1112,7 +1155,7 @@ def _gerar_e_enviar_arquivo(telefone: str, dados: dict, tipo: str, assinante: di
                 tipo_arquivo="operacional",
                 nome_prato=nome_prato_limpo,
             )
-            print(f"[Gerador] Combo concluido: tecnica={caminho_tecnica} operacional={caminho_operacional}")
+            logger.info(f"[Gerador] Combo concluido: tecnica={caminho_tecnica} operacional={caminho_operacional}")
         else:
             dados_exec = dados
             if tipo == "operacional":
@@ -1127,33 +1170,24 @@ def _gerar_e_enviar_arquivo(telefone: str, dados: dict, tipo: str, assinante: di
                 tipo_arquivo=tipo,
                 nome_prato=nome_prato_limpo,
             )
-            print(f"[Gerador] Arquivo {tipo} concluido: {caminho_final}")
+            logger.info(f"[Gerador] Arquivo {tipo} concluido: {caminho_final}")
 
         if cobrar_credito:
             banco.incrementar_ficha(telefone)
-            print(f"[Credito] +1 credito aplicado para {telefone} ({nome_prato_limpo})")
+            logger.info(f"[Credito] +1 credito aplicado para {telefone} ({nome_prato_limpo})")
         else:
-            print(f"[Credito] Nenhum credito adicional para {telefone} ({nome_prato_limpo})")
+            logger.debug(f"[Credito] Nenhum credito adicional para {telefone} ({nome_prato_limpo})")
 
         _salvar_ingredientes_da_ficha(telefone, dados)
 
         assinante_atualizado = banco.get_assinante(telefone)
         fichas_rest = assinante_atualizado["fichas_limite_mes"] - assinante_atualizado["fichas_geradas_mes"]
-        whatsapp.enviar_texto(
-            telefone,
-            f"✅ Ficha gerada com sucesso!\n\n"
-            f"Fichas restantes este mes: *{fichas_rest}/30*\n\n"
-            "Quer criar outra ficha ou calcular algum custo?",
-        )
+        whatsapp.enviar_texto(telefone, _msg("ficha_gerada_sucesso", fichas_rest=fichas_rest))
 
     except Exception as e:
         safe_msg = str(e).encode('utf-8', 'ignore').decode('utf-8')
-        print(f"[Gerador] Erro ao gerar arquivo: {safe_msg}")
-        whatsapp.enviar_texto(
-            telefone,
-            "⚠️ Ocorreu um erro ao gerar a ficha. Nossa equipe foi notificada. "
-            "Tente novamente em instantes!",
-        )
+        logger.error(f"[Gerador] Erro ao gerar arquivo: {safe_msg}")
+        whatsapp.enviar_texto(telefone, _msg("erro_gerar_ficha"))
         banco.criar_notificacao(
             "erro_sistema",
             "critico",
@@ -1186,11 +1220,11 @@ def _gerar_enviar_registrar_arquivo(telefone: str, dados: dict, tipo_arquivo: st
         caminho_final = storage.salvar_arquivo(telefone, nome_arquivo, caminho_origem=caminho_tmp)
         whatsapp.enviar_arquivo(telefone, caminho_final, caption=caption)
         _registrar_ficha_gerada(telefone, dados, tipo_arquivo, nome_prato, caminho_final)
-        print(f"[Gerador] {tipo_arquivo} enviado para {telefone}: {caminho_final}")
+        logger.info(f"[Gerador] {tipo_arquivo} enviado para {telefone}: {caminho_final}")
         return caminho_final
 
 
-def _registrar_ficha_gerada(telefone: str, dados: dict, tipo: str, nome_prato: str, caminho_final: str):
+def _registrar_ficha_gerada(telefone: str, dados: dict, tipo: str, nome_prato: str, caminho_final: str) -> None:
     custo_total = _calcular_custo_total(dados)
     peso_porcao = dados.get("peso_porcao_kg", 0.1)
     ingredientes = dados.get("ingredientes", [])
@@ -1209,10 +1243,10 @@ def _registrar_ficha_gerada(telefone: str, dados: dict, tipo: str, nome_prato: s
             "arquivo_path": caminho_final,
         },
     )
-    print(f"[Banco] Ficha registrada tipo={tipo} prato={nome_prato}")
+    logger.info(f"[Banco] Ficha registrada tipo={tipo} prato={nome_prato}")
 
 
-def _salvar_ingredientes_da_ficha(telefone: str, dados: dict):
+def _salvar_ingredientes_da_ficha(telefone: str, dados: dict) -> None:
     ingredientes = dados.get("ingredientes", [])
     for ing in ingredientes:
         banco.salvar_ingrediente(
@@ -1224,7 +1258,7 @@ def _salvar_ingredientes_da_ficha(telefone: str, dados: dict):
             ing.get("ic", 1.0),
         )
     if ingredientes:
-        print(f"[Banco] Ingredientes atualizados: {len(ingredientes)} item(ns)")
+        logger.info(f"[Banco] Ingredientes atualizados: {len(ingredientes)} item(ns)")
 
 
 def _calcular_custo_total(dados: dict) -> float:
@@ -1236,21 +1270,17 @@ def _calcular_custo_total(dados: dict) -> float:
 
 # â”€â”€ FALHAS E ALERTAS â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
-def _registrar_falha(telefone: str, assinante: dict):
+def _registrar_falha(telefone: str, assinante: dict) -> None:
     _falhas[telefone] = _falhas.get(telefone, 0) + 1
     qtd = _falhas[telefone]
 
     if qtd == 1:
-        whatsapp.enviar_texto(telefone,
-            "NÃ£o consegui entender sua mensagem. Pode repetir de outra forma? ðŸ˜Š")
+        whatsapp.enviar_texto(telefone, _msg("falha_entender_1"))
     elif qtd == 2:
-        whatsapp.enviar_texto(telefone,
-            "Ainda nÃ£o consegui entender. Tente descrever o que precisa em poucas palavras.")
+        whatsapp.enviar_texto(telefone, _msg("falha_entender_2"))
     elif qtd >= 3:
         _falhas[telefone] = 0
-        whatsapp.enviar_texto(telefone,
-            "Parece que estou com dificuldade em entender. "
-            "Vou acionar nossa equipe para te ajudar em breve! ðŸ™")
+        whatsapp.enviar_texto(telefone, _msg("falha_entender_3"))
         # Alerta para o gestor
         nome = assinante.get("nome", telefone)
         banco.criar_notificacao(
@@ -1260,15 +1290,10 @@ def _registrar_falha(telefone: str, assinante: dict):
             telefone
         )
         if config.GESTOR_WHATSAPP:
-            whatsapp.enviar_texto(
-                config.GESTOR_WHATSAPP,
-                f"âš ï¸ Alerta Mindnutri\n\n"
-                f"O cliente *{nome}* ({telefone}) enviou 3 mensagens que o agente nÃ£o conseguiu interpretar.\n"
-                f"Pode ser necessÃ¡rio atendimento manual."
-            )
+            whatsapp.enviar_texto(config.GESTOR_WHATSAPP, _msg("alerta_gestor_nao_entendeu", nome=nome, telefone=telefone))
 
 
-def _enviar_link_renovacao(telefone: str, assinante: dict, metodo: str):
+def _enviar_link_renovacao(telefone: str, assinante: dict, metodo: str) -> None:
     try:
         if metodo == "cartao":
             from utils.asaas import criar_link_cartao_avulso
@@ -1299,14 +1324,8 @@ def _enviar_link_renovacao(telefone: str, assinante: dict, metodo: str):
                 {"payment_id": pagamento.get("payment_id", ""), "metodo_pagamento": metodo},
             )
 
-        whatsapp.enviar_texto(
-            telefone,
-            f"Aqui esta seu link para renovacao via *{metodo}*:\n\nðŸ”— {link}\n\n"
-            "Apos o pagamento, suas fichas sao renovadas automaticamente.",
-        )
-    except Exception:
-        whatsapp.enviar_texto(
-            telefone,
-            "Em instantes nossa equipe te enviara o link de renovacao.",
-        )
+        whatsapp.enviar_texto(telefone, _msg("link_renovacao", metodo=metodo, link=link))
+    except Exception as e:
+        logger.error(f"[Renovacao] Erro ao gerar link de renovacao para {telefone}: {e}")
+        whatsapp.enviar_texto(telefone, _msg("erro_renovacao"))
 

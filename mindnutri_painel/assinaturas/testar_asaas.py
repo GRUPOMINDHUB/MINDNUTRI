@@ -78,7 +78,7 @@ def main():
     try:
         assinatura = asaas.criar_assinatura(
             customer_id=customer_id,
-            valor=59.90,
+            valor=config.PLANO_VALOR,
             descricao="Mindnutri — Teste de assinatura",
         )
         subscription_id = assinatura["id"]
@@ -107,7 +107,7 @@ def main():
         from datetime import date, timedelta
         cobranca = asaas.criar_cobranca(
             customer_id=customer_id,
-            valor=59.90,
+            valor=config.PLANO_VALOR,
             descricao="Mindnutri — Teste cobrança avulsa",
             vencimento=date.today() + timedelta(days=7),
         )

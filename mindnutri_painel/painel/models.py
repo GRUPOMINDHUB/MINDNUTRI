@@ -172,3 +172,233 @@ class EstadoConversa(models.Model):
 
     def __str__(self):
         return f"Estado de {self.telefone}: {self.estado}"
+
+
+class ConfiguracaoIA(models.Model):
+    """Singleton — configuração do modelo de IA editável pelo admin."""
+
+    # Seções do prompt
+    persona = models.TextField(
+        verbose_name='Persona',
+        help_text='Quem é a IA, tom de voz e regras críticas de comportamento.',
+        default=''
+    )
+    metodologia = models.TextField(
+        verbose_name='Metodologia',
+        help_text='Didática, clareza, eficiência, linguagem acessível e jornada tripla.',
+        default=''
+    )
+    instrucoes_geracao = models.TextField(
+        verbose_name='Instruções de Geração',
+        help_text='Como gerar cada parte: relatórios, fichas, cálculos matemáticos.',
+        default=''
+    )
+    formato_saida = models.TextField(
+        verbose_name='Formato de Saída',
+        help_text='Template esperado na resposta.',
+        default=''
+    )
+
+    # Parâmetros do modelo
+    modelo_ia = models.CharField(max_length=50, default='gpt-4o')
+    max_tokens = models.IntegerField(default=3000)
+    temperatura = models.FloatField(default=0.7)
+
+    atualizado_em = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = 'Configuração IA'
+        verbose_name_plural = 'Configuração IA'
+
+    def __str__(self):
+        return f"Configuração IA ({self.modelo_ia})"
+
+    def get_system_prompt(self):
+        """Concatena as 4 seções em um único system prompt."""
+        partes = [
+            self.persona,
+            self.metodologia,
+            self.instrucoes_geracao,
+            self.formato_saida,
+        ]
+        return '\n\n---\n\n'.join(p.strip() for p in partes if p.strip())
+
+    @classmethod
+    def get_config(cls):
+        """Retorna a configuração singleton, criando com defaults se necessário."""
+        from .prompt_defaults import PERSONA_DEFAULT, METODOLOGIA_DEFAULT, INSTRUCOES_DEFAULT, FORMATO_DEFAULT
+        obj, created = cls.objects.get_or_create(
+            pk=1,
+            defaults={
+                'persona': PERSONA_DEFAULT,
+                'metodologia': METODOLOGIA_DEFAULT,
+                'instrucoes_geracao': INSTRUCOES_DEFAULT,
+                'formato_saida': FORMATO_DEFAULT,
+            }
+        )
+        return obj
+
+
+class Cupom(models.Model):
+    """Cupom de desconto — aplica valor especial no primeiro pagamento."""
+    codigo = models.CharField(max_length=50, unique=True)
+    valor_primeiro_pagamento = models.DecimalField(max_digits=10, decimal_places=2, help_text='Valor do primeiro pagamento com cupom')
+    ativo = models.BooleanField(default=True)
+    usos = models.PositiveIntegerField(default=0, help_text='Quantas vezes foi usado')
+    criado_em = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['-criado_em']
+        verbose_name = 'Cupom'
+        verbose_name_plural = 'Cupons'
+
+    def __str__(self):
+        return f"{self.codigo} — R$ {self.valor_primeiro_pagamento}"
+
+    @classmethod
+    def validar(cls, codigo: str):
+        """Retorna o cupom se válido, None se inválido."""
+        try:
+            cupom = cls.objects.get(codigo__iexact=codigo.strip(), ativo=True)
+            return cupom
+        except cls.DoesNotExist:
+            return None
+
+    def usar(self):
+        """Incrementa contador de usos."""
+        self.usos += 1
+        self.save(update_fields=['usos'])
+
+
+class PerdaIngrediente(models.Model):
+    """Base de conhecimento de perdas padrão — editável pelo painel."""
+
+    CATEGORIA_CHOICES = [
+        ('carnes', 'Carnes e Proteínas'),
+        ('laticinios', 'Laticínios e Ovos'),
+        ('vegetais', 'Vegetais e Legumes'),
+        ('frutas', 'Frutas'),
+        ('graos', 'Grãos e Cereais'),
+        ('padaria', 'Farinhas e Panificação'),
+        ('oleos_molhos', 'Óleos, Gorduras e Molhos'),
+        ('doces', 'Açúcar e Doces'),
+    ]
+    TIPO_PERDA_CHOICES = [
+        ('limpeza', 'Limpeza'),
+        ('coccao', 'Cocção'),
+        ('ganho', 'Ganho (absorve água)'),
+        ('nenhuma', 'Nenhuma'),
+    ]
+
+    nome = models.CharField(max_length=200, unique=True)
+    categoria = models.CharField(max_length=30, choices=CATEGORIA_CHOICES)
+    perda_percentual = models.IntegerField(default=0, help_text='Positivo=perda, Negativo=ganho. Ex: 30 perde 30%, -200 ganha 200% (triplica)')
+    tipo_perda = models.CharField(max_length=20, choices=TIPO_PERDA_CHOICES, default='nenhuma')
+    atualizado_em = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['categoria', 'nome']
+        verbose_name = 'Perda de Ingrediente'
+        verbose_name_plural = 'Perdas de Ingredientes'
+
+    def __str__(self):
+        return f"{self.nome} — {self.perda_percentual}% ({self.tipo_perda})"
+
+    @classmethod
+    def carregar_todas(cls):
+        """Retorna lista de dicts com todas as perdas."""
+        cls.inicializar_defaults()
+        return list(cls.objects.values('nome', 'categoria', 'perda_percentual', 'tipo_perda'))
+
+    @classmethod
+    def inicializar_defaults(cls):
+        """Cria entradas faltantes a partir de perdas_defaults.py."""
+        from .perdas_defaults import PERDAS_PADRAO
+        existentes = set(cls.objects.values_list('nome', flat=True))
+        novas = []
+        for p in PERDAS_PADRAO:
+            if p['nome'] not in existentes:
+                novas.append(cls(
+                    nome=p['nome'],
+                    categoria=p['categoria'],
+                    perda_percentual=p['perda_percentual'],
+                    tipo_perda=p['tipo_perda'],
+                ))
+        if novas:
+            cls.objects.bulk_create(novas)
+
+    @classmethod
+    def buscar_perdas_para_ingredientes(cls, nomes_ingredientes: list[str]) -> dict:
+        """Busca perdas para uma lista de nomes de ingredientes (match parcial)."""
+        todas = cls.objects.filter(perda_percentual__gt=0)
+        resultado = {}
+        for nome_ing in nomes_ingredientes:
+            nome_lower = nome_ing.lower().strip()
+            for perda in todas:
+                perda_lower = perda.nome.lower()
+                if nome_lower in perda_lower or perda_lower in nome_lower:
+                    resultado[nome_ing] = {
+                        'nome_base': perda.nome,
+                        'perda_percentual': perda.perda_percentual,
+                        'tipo_perda': perda.tipo_perda,
+                    }
+                    break
+        return resultado
+
+
+class MensagemBot(models.Model):
+    """Mensagens configuráveis do bot — editáveis pelo painel."""
+
+    CATEGORIA_CHOICES = [
+        ('boas_vindas', 'Boas-vindas'),
+        ('menu', 'Menu Principal'),
+        ('coleta', 'Coleta de Dados'),
+        ('pagamento', 'Pagamento'),
+        ('fichas', 'Fichas Técnicas'),
+        ('operacional', 'Ficha Operacional (PDF)'),
+        ('erros', 'Erros e Alertas'),
+        ('renovacao', 'Renovação'),
+        ('webhook', 'Webhook / Pós-pagamento'),
+    ]
+
+    chave = models.CharField(max_length=80, primary_key=True)
+    categoria = models.CharField(max_length=30, choices=CATEGORIA_CHOICES)
+    descricao = models.CharField(max_length=300, blank=True)
+    texto = models.TextField()
+    variaveis = models.CharField(max_length=200, blank=True,
+                                  help_text='Variáveis disponíveis separadas por vírgula')
+    ordem = models.PositiveIntegerField(default=0)
+    atualizado_em = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['categoria', 'ordem']
+        verbose_name = 'Mensagem do Bot'
+        verbose_name_plural = 'Mensagens do Bot'
+
+    def __str__(self):
+        return f"[{self.categoria}] {self.chave}"
+
+    @classmethod
+    def carregar_todas(cls):
+        """Retorna dict {chave: texto} de todas as mensagens."""
+        cls.inicializar_defaults()
+        return dict(cls.objects.values_list('chave', 'texto'))
+
+    @classmethod
+    def inicializar_defaults(cls):
+        """Cria entradas faltantes a partir de mensagem_defaults.py."""
+        from .mensagem_defaults import MENSAGENS_PADRAO
+        existentes = set(cls.objects.values_list('chave', flat=True))
+        novas = []
+        for m in MENSAGENS_PADRAO:
+            if m['chave'] not in existentes:
+                novas.append(cls(
+                    chave=m['chave'],
+                    categoria=m['categoria'],
+                    descricao=m.get('descricao', ''),
+                    texto=m['texto'],
+                    variaveis=m.get('variaveis', ''),
+                    ordem=m.get('ordem', 0),
+                ))
+        if novas:
+            cls.objects.bulk_create(novas)

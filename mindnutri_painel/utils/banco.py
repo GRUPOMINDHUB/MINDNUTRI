@@ -1,7 +1,10 @@
 import json
+import logging
 from datetime import datetime, timedelta, date
 from django.utils import timezone
 from painel.models import Assinante, FichaTecnica, Notificacao, Conversa, Ingrediente, EstadoConversa
+
+logger = logging.getLogger(__name__)
 
 # ── ASSINANTES ────────────────────────────────────────────────────
 
@@ -31,18 +34,18 @@ def get_assinante(telefone: str) -> dict | None:
     except Assinante.DoesNotExist:
         return None
 
-def criar_assinante(telefone: str) -> dict:
+def criar_assinante(telefone: str) -> dict | None:
     Assinante.objects.get_or_create(telefone=telefone)
     return get_assinante(telefone)
 
-def atualizar_assinante(telefone: str, **campos):
+def atualizar_assinante(telefone: str, **campos) -> None:
     try:
         a = Assinante.objects.get(telefone=telefone)
         if 'asaas_customer_id' in campos:
             a.asaas_id = campos.pop('asaas_customer_id')
         if 'total_fichas' in campos:
             a.total_fichas_geradas = campos.pop('total_fichas')
-            
+
         for k, v in campos.items():
             if hasattr(a, k):
                 setattr(a, k, v)
@@ -50,17 +53,7 @@ def atualizar_assinante(telefone: str, **campos):
     except Assinante.DoesNotExist:
         pass
 
-def assinante_ativo(telefone: str) -> bool:
-    v = get_assinante(telefone)
-    return v is not None and v["status"] == "ativo"
-
-def fichas_disponiveis(telefone: str) -> bool:
-    v = get_assinante(telefone)
-    if not v:
-        return False
-    return v["fichas_geradas_mes"] < v["fichas_limite_mes"]
-
-def incrementar_ficha(telefone: str):
+def incrementar_ficha(telefone: str) -> None:
     try:
         a = Assinante.objects.get(telefone=telefone)
         a.fichas_geradas_mes += 1
@@ -91,7 +84,7 @@ def possui_ficha_no_mes(telefone: str, nome_prato: str, tipo: str | None = None)
 
 # ── CONVERSAS ─────────────────────────────────────────────────────
 
-def salvar_mensagem(telefone: str, role: str, content: str):
+def salvar_mensagem(telefone: str, role: str, content: str) -> None:
     assinante = Assinante.objects.filter(telefone=telefone).first()
     Conversa.objects.create(
         telefone=telefone,
@@ -113,9 +106,22 @@ def get_historico(telefone: str, limite: int = 20) -> list[dict]:
             
     return historico
 
-def _limpar_historico_antigo(telefone: str):
+def _limpar_historico_antigo(telefone: str) -> None:
     limite = timezone.now() - timedelta(days=2)
     Conversa.objects.filter(telefone=telefone, criado_em__lt=limite).delete()
+
+def limpar_historico(telefone: str) -> None:
+    """Apaga todo o histórico de conversa de um telefone (usado no reset completo)."""
+    Conversa.objects.filter(telefone=telefone).delete()
+
+def get_tempo_inativo_minutos(telefone: str) -> int:
+    """Retorna quantos minutos se passaram desde a última atualização do estado."""
+    try:
+        obj = EstadoConversa.objects.get(telefone=telefone)
+        delta = timezone.now() - obj.atualizado_em
+        return int(delta.total_seconds() / 60)
+    except EstadoConversa.DoesNotExist:
+        return 0
 
 # ── ESTADO DA CONVERSA ────────────────────────────────────────────
 
@@ -126,14 +132,14 @@ def get_estado(telefone: str) -> dict:
         "dados": json.loads(obj.dados_temp or "{}")
     }
 
-def set_estado(telefone: str, estado: str, dados: dict = None):
+def set_estado(telefone: str, estado: str, dados: dict | None = None) -> None:
     dados_str = json.dumps(dados or {}, ensure_ascii=False)
     obj, created = EstadoConversa.objects.get_or_create(telefone=telefone)
     obj.estado = estado
     obj.dados_temp = dados_str
     obj.save()
 
-def resetar_estado(telefone: str):
+def resetar_estado(telefone: str) -> None:
     set_estado(telefone, "inicio", {})
 
 
@@ -169,21 +175,8 @@ def get_ingredientes(telefone: str) -> list[dict]:
         "ic": float(i.ic)
     } for i in ings]
 
-def get_ingrediente(telefone: str, nome: str) -> dict | None:
-    try:
-        i = Ingrediente.objects.get(telefone=telefone, nome__iexact=nome)
-        return {
-            "nome": i.nome,
-            "unidade": i.unidade,
-            "custo_unitario": i.custo_unitario,
-            "fc": float(i.fc),
-            "ic": float(i.ic)
-        }
-    except Ingrediente.DoesNotExist:
-        return None
-
 def salvar_ingrediente(telefone: str, nome: str, unidade: str,
-                        custo: float, fc: float = 1.0, ic: float = 1.0):
+                        custo: float, fc: float = 1.0, ic: float = 1.0) -> None:
     assinante = Assinante.objects.filter(telefone=telefone).first()
     obj, created = Ingrediente.objects.update_or_create(
         telefone=telefone, nome=nome,
@@ -200,7 +193,7 @@ def salvar_ingrediente(telefone: str, nome: str, unidade: str,
 # ── NOTIFICAÇÕES ──────────────────────────────────────────────────
 
 def criar_notificacao(tipo: str, nivel: str, titulo: str,
-                       mensagem: str, telefone: str = None):
+                       mensagem: str, telefone: str | None = None) -> None:
     assinante = None
     if telefone:
         assinante = Assinante.objects.filter(telefone=telefone).first()

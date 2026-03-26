@@ -59,7 +59,7 @@
         <tr>
           <th>Assinante</th>
           <th>Nicho</th>
-          <th>Cidade</th>
+          <th>Telefone</th>
           <th>Status</th>
           <th>Fichas (mês)</th>
           <th>Próx. cobrança</th>
@@ -82,7 +82,7 @@
             {% else %}🍽{% endif %}
             {{ a.get_nicho_display }}
           </td>
-          <td style="font-size:.82rem">{{ a.cidade|default:"—" }}</td>
+          <td style="font-size:.82rem;font-family:'DM Mono','Courier New',monospace">{{ a.telefone }}</td>
           <td>
             <span class="badge badge-{{ a.status }}">{{ a.get_status_display }}</span>
           </td>

@@ -1,0 +1,1460 @@
+{% extends "painel/base.html" %}
+{% block title %}Configurações do Modelo — Mindnutri{% endblock %}
+{% block page_title %}Configurações do Modelo{% endblock %}
+
+{% block content %}
+<style>
+/* ── ABAS ── */
+.tabs-bar {
+  display: flex; gap: 4px;
+  border-bottom: 2px solid var(--borda);
+  margin-bottom: 24px;
+}
+.tab-btn {
+  padding: 10px 20px;
+  font-family: 'Syne', sans-serif;
+  font-size: .83rem; font-weight: 600;
+  background: none; border: none; cursor: pointer;
+  color: var(--cinza3);
+  border-bottom: 2px solid transparent;
+  margin-bottom: -2px;
+  transition: all .15s;
+}
+.tab-btn:hover { color: var(--preto); }
+.tab-btn.active { color: var(--vermelho); border-bottom-color: var(--vermelho); }
+
+.tab-panel { display: none; }
+.tab-panel.active { display: block; }
+
+/* ── SEÇÕES DO PROMPT ── */
+.prompt-section {
+  background: var(--card);
+  border: 1px solid var(--borda);
+  border-radius: var(--r2);
+  margin-bottom: 16px;
+  overflow: hidden;
+}
+.prompt-section-header {
+  padding: 14px 20px;
+  border-bottom: 1px solid var(--borda);
+  display: flex; align-items: center; justify-content: space-between;
+  background: #fafafa;
+  cursor: pointer;
+  user-select: none;
+}
+.prompt-section-header:hover { background: #f4f4f2; }
+.prompt-section-title {
+  font-family: 'Syne', sans-serif;
+  font-weight: 700; font-size: .9rem; color: var(--preto);
+  display: flex; align-items: center; gap: 8px;
+}
+.prompt-section-sub {
+  font-size: .75rem; color: var(--cinza3); font-family: 'DM Sans', sans-serif;
+}
+.prompt-chevron { font-size: 12px; color: var(--cinza3); transition: transform .2s; }
+.prompt-chevron.open { transform: rotate(180deg); }
+.prompt-section-body { padding: 16px 20px; }
+.prompt-textarea {
+  width: 100%; min-height: 180px;
+  padding: 12px 14px;
+  border: 1px solid var(--borda);
+  border-radius: var(--r);
+  font-family: 'DM Mono', 'Courier New', monospace;
+  font-size: .82rem; line-height: 1.6;
+  color: var(--preto); background: #fff;
+  resize: vertical; outline: none;
+  transition: border-color .15s;
+}
+.prompt-textarea:focus { border-color: var(--vermelho); }
+
+/* ── PARÂMETROS ── */
+.param-card {
+  background: var(--card);
+  border: 1px solid var(--borda);
+  border-radius: var(--r2);
+  padding: 24px;
+  margin-bottom: 16px;
+}
+.param-label {
+  font-family: 'Syne', sans-serif;
+  font-weight: 700; font-size: .88rem; color: var(--preto);
+  margin-bottom: 4px;
+}
+.param-desc { font-size: .78rem; color: var(--cinza3); margin-bottom: 16px; }
+
+/* Card do modelo */
+.modelo-card {
+  border: 2px solid var(--vermelho);
+  border-radius: var(--r2);
+  padding: 18px 20px;
+  background: #fff8f8;
+  display: flex; align-items: flex-start; gap: 14px;
+  max-width: 340px;
+}
+.modelo-badge {
+  background: var(--vermelho); color: #fff;
+  font-family: 'Syne', sans-serif;
+  font-size: .7rem; font-weight: 700; letter-spacing: .5px;
+  padding: 2px 8px; border-radius: 20px;
+  white-space: nowrap;
+}
+.modelo-name {
+  font-family: 'Syne', sans-serif;
+  font-weight: 700; font-size: 1rem; color: var(--preto);
+}
+.modelo-pricing { font-size: .75rem; color: var(--cinza3); margin-top: 4px; }
+.modelo-check { font-size: 20px; margin-left: auto; }
+
+/* Slider */
+.slider-wrap { position: relative; padding-bottom: 8px; }
+.range-input {
+  -webkit-appearance: none;
+  width: 100%; height: 6px;
+  border-radius: 4px;
+  background: linear-gradient(to right, var(--vermelho) 0%, var(--vermelho) var(--pct, 35%), #e8e8e5 var(--pct, 35%), #e8e8e5 100%);
+  outline: none; cursor: pointer;
+}
+.range-input::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 20px; height: 20px;
+  border-radius: 50%;
+  background: var(--vermelho);
+  border: 3px solid #fff;
+  box-shadow: 0 1px 4px rgba(0,0,0,.2);
+  cursor: pointer;
+}
+.range-labels {
+  display: flex; justify-content: space-between;
+  font-size: .72rem; color: var(--cinza3); margin-top: 6px;
+}
+.range-value-display {
+  font-family: 'Syne', sans-serif;
+  font-weight: 700; font-size: 1.1rem;
+  color: var(--preto); margin-bottom: 12px;
+}
+
+/* Custo estimado */
+.custo-box {
+  background: var(--preto2);
+  border-radius: var(--r2);
+  padding: 20px 24px;
+  margin-top: 8px;
+}
+.custo-label { font-size: .75rem; color: var(--cinza3); margin-bottom: 4px; letter-spacing: .5px; text-transform: uppercase; }
+.custo-valor {
+  font-family: 'Syne', sans-serif;
+  font-size: 1.8rem; font-weight: 800; color: #fff;
+}
+.custo-valor span { font-size: .9rem; color: var(--cinza3); margin-left: 6px; }
+.custo-desc { font-size: .75rem; color: var(--cinza3); margin-top: 6px; }
+
+/* ── PREVIEW ── */
+.preview-wrap {
+  display: grid; grid-template-columns: 1fr 320px; gap: 20px; align-items: start;
+}
+.chat-window {
+  background: var(--card);
+  border: 1px solid var(--borda);
+  border-radius: var(--r2);
+  display: flex; flex-direction: column;
+  height: 560px; overflow: hidden;
+}
+.chat-header {
+  padding: 14px 20px;
+  border-bottom: 1px solid var(--borda);
+  background: #fafafa;
+  display: flex; align-items: center; justify-content: space-between;
+}
+.chat-header-title {
+  font-family: 'Syne', sans-serif;
+  font-weight: 700; font-size: .88rem; color: var(--preto);
+}
+.chat-messages {
+  flex: 1; overflow-y: auto;
+  padding: 16px;
+  display: flex; flex-direction: column; gap: 10px;
+}
+.msg {
+  max-width: 80%;
+  padding: 10px 14px;
+  border-radius: 16px;
+  font-size: .86rem; line-height: 1.5;
+  white-space: pre-wrap; word-break: break-word;
+}
+.msg.user {
+  align-self: flex-end;
+  background: var(--vermelho); color: #fff;
+  border-bottom-right-radius: 4px;
+}
+.msg.assistant {
+  align-self: flex-start;
+  background: #f0f0f0; color: var(--preto);
+  border-bottom-left-radius: 4px;
+}
+.msg.typing {
+  align-self: flex-start;
+  background: #f0f0f0; color: var(--cinza3);
+  font-style: italic;
+}
+.chat-input-row {
+  padding: 12px 16px;
+  border-top: 1px solid var(--borda);
+  display: flex; gap: 8px;
+}
+.chat-input {
+  flex: 1; padding: 9px 14px;
+  border: 1px solid var(--borda); border-radius: var(--r);
+  font-size: .86rem; font-family: 'DM Sans', sans-serif;
+  outline: none; color: var(--preto);
+  transition: border-color .15s;
+}
+.chat-input:focus { border-color: var(--vermelho); }
+
+/* Info lateral do preview */
+.preview-info {
+  display: flex; flex-direction: column; gap: 14px;
+}
+.info-chip {
+  background: var(--card);
+  border: 1px solid var(--borda);
+  border-radius: var(--r2);
+  padding: 16px 18px;
+}
+.info-chip .ic-label {
+  font-size: .72rem; text-transform: uppercase; letter-spacing: .5px;
+  color: var(--cinza3); margin-bottom: 6px;
+}
+.info-chip .ic-value {
+  font-family: 'Syne', sans-serif;
+  font-weight: 700; font-size: .95rem; color: var(--preto);
+}
+.tokens-bar-wrap { margin-top: 8px; }
+.tokens-bar-bg { background: #f0f0f0; border-radius: 4px; height: 6px; }
+.tokens-bar-fill { height: 100%; border-radius: 4px; background: var(--vermelho); transition: width .4s; }
+
+/* ── CONEXÃO ── */
+.status-hero {
+  background: var(--card);
+  border: 1px solid var(--borda);
+  border-radius: var(--r2);
+  padding: 22px 24px;
+  margin-bottom: 16px;
+  display: flex; align-items: center; gap: 16px;
+}
+.status-dot {
+  width: 14px; height: 14px; border-radius: 50%; flex-shrink: 0;
+}
+.status-dot.conectado  { background: #22c55e; box-shadow: 0 0 0 5px #22c55e22; }
+.status-dot.desconectado { background: #ef4444; box-shadow: 0 0 0 5px #ef444422; }
+.status-dot.conectando { background: #f59e0b; box-shadow: 0 0 0 5px #f59e0b22; animation: pulseDot 1.4s ease-in-out infinite; }
+.status-dot.carregando { background: #cbd5e1; animation: pulseDot 1s ease-in-out infinite; }
+@keyframes pulseDot { 0%,100%{ opacity:1 } 50%{ opacity:.35 } }
+
+.status-label {
+  font-family: 'Syne', sans-serif;
+  font-weight: 700; font-size: .98rem; color: var(--preto);
+}
+.status-sub { font-size: .76rem; color: var(--cinza3); margin-top: 3px; }
+.status-actions { margin-left: auto; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+
+.conexao-grid {
+  display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 16px;
+}
+
+/* QR Code */
+.qr-card {
+  background: var(--card);
+  border: 1px solid var(--borda);
+  border-radius: var(--r2);
+  padding: 24px;
+  display: flex; flex-direction: column; align-items: center;
+}
+.qr-card-title {
+  font-family: 'Syne', sans-serif;
+  font-weight: 700; font-size: .88rem; color: var(--preto);
+  margin-bottom: 18px; align-self: flex-start;
+}
+.qr-img-box {
+  width: 210px; height: 210px;
+  border-radius: var(--r);
+  overflow: hidden; flex-shrink: 0;
+}
+.qr-img-box img { width: 100%; height: 100%; object-fit: contain; display: block; }
+.qr-placeholder {
+  width: 210px; height: 210px;
+  background: #f8f8f6; border: 2px dashed var(--borda);
+  border-radius: var(--r);
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  color: var(--cinza3); font-size: .8rem; text-align: center; gap: 10px;
+}
+.qr-countdown-wrap { text-align: center; margin: 12px 0 6px; }
+.qr-timer-num {
+  font-family: 'Syne', sans-serif;
+  font-weight: 800; font-size: 2.2rem; color: var(--vermelho); line-height: 1;
+}
+.qr-timer-lbl { font-size: .68rem; color: var(--cinza3); text-transform: uppercase; letter-spacing: .5px; margin-top: 2px; }
+.qr-hint { font-size: .69rem; color: var(--cinza3); text-align: center; margin-top: 10px; line-height: 1.5; }
+
+/* Services */
+.svc-card {
+  background: var(--card);
+  border: 1px solid var(--borda);
+  border-radius: var(--r2);
+  padding: 20px;
+  margin-bottom: 14px;
+}
+.svc-card-title {
+  font-family: 'Syne', sans-serif;
+  font-weight: 700; font-size: .88rem; color: var(--preto);
+  margin-bottom: 14px;
+}
+.svc-row {
+  display: flex; align-items: center; gap: 10px;
+  padding: 9px 0; border-bottom: 1px solid var(--borda);
+}
+.svc-row:last-child { border-bottom: none; }
+.svc-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+.svc-dot.ok   { background: #22c55e; }
+.svc-dot.erro { background: #ef4444; }
+.svc-dot.idle { background: #cbd5e1; animation: pulseDot 1s ease-in-out infinite; }
+.svc-name { font-size: .83rem; font-weight: 600; color: var(--preto); flex: 1; }
+.svc-tag  { font-size: .68rem; color: var(--cinza3); background: #f0f0ee; padding: 1px 7px; border-radius: 10px; white-space: nowrap; }
+
+/* Info instância */
+.inst-row {
+  display: flex; align-items: flex-start; gap: 10px;
+  padding: 9px 0; border-bottom: 1px solid var(--borda); font-size: .8rem;
+}
+.inst-row:last-child { border-bottom: none; }
+.inst-key { color: var(--cinza3); width: 80px; flex-shrink: 0; padding-top: 1px; }
+.inst-val { font-family: 'DM Mono', monospace; color: var(--preto); word-break: break-all; }
+
+/* ── BOTÃO SALVAR / FEEDBACK ── */
+.save-row {
+  display: flex; align-items: center; gap: 12px;
+  margin-top: 20px;
+}
+.save-feedback {
+  font-size: .82rem; color: #1a9e5c;
+  opacity: 0; transition: opacity .3s;
+}
+.save-feedback.show { opacity: 1; }
+.save-feedback.erro { color: var(--vermelho); }
+</style>
+
+<!-- ABAS -->
+<div class="tabs-bar">
+  <button class="tab-btn active" data-tab="prompt">⬡ Prompt</button>
+  <button class="tab-btn" data-tab="parametros">◈ Parâmetros</button>
+  <button class="tab-btn" data-tab="preview">▷ Teste / Preview</button>
+  <button class="tab-btn" data-tab="conexao">◉ Conexão</button>
+  <button class="tab-btn" data-tab="mensagens">✉ Mensagens</button>
+  <button class="tab-btn" data-tab="perdas">🥩 Perdas</button>
+</div>
+
+<!-- ═══════════════ ABA PROMPT ═══════════════ -->
+<div class="tab-panel active" id="tab-prompt">
+
+  <div style="font-size:.82rem;color:var(--cinza3);margin-bottom:20px;">
+    O prompt final é montado combinando as 4 seções abaixo + dados dinâmicos do cliente (nome, fichas restantes, ingredientes). Você edita apenas as seções de instrução.
+  </div>
+
+  <!-- Persona -->
+  <div class="prompt-section" id="ps-persona">
+    <div class="prompt-section-header" onclick="toggleSection('persona')">
+      <div>
+        <div class="prompt-section-title">👤 Persona / Papel</div>
+        <div class="prompt-section-sub">Quem é a IA, tom de voz e regras críticas de comportamento</div>
+      </div>
+      <span class="prompt-chevron open" id="chev-persona">▾</span>
+    </div>
+    <div class="prompt-section-body" id="body-persona">
+      <textarea class="prompt-textarea" id="txt-persona" rows="10">{{ config.persona }}</textarea>
+    </div>
+  </div>
+
+  <!-- Metodologia -->
+  <div class="prompt-section" id="ps-metodologia">
+    <div class="prompt-section-header" onclick="toggleSection('metodologia')">
+      <div>
+        <div class="prompt-section-title">🗺️ Metodologia</div>
+        <div class="prompt-section-sub">Didática, clareza, eficiência, linguagem acessível e jornada tripla</div>
+      </div>
+      <span class="prompt-chevron open" id="chev-metodologia">▾</span>
+    </div>
+    <div class="prompt-section-body" id="body-metodologia">
+      <textarea class="prompt-textarea" id="txt-metodologia" rows="14">{{ config.metodologia }}</textarea>
+    </div>
+  </div>
+
+  <!-- Instruções de Geração -->
+  <div class="prompt-section" id="ps-instrucoes">
+    <div class="prompt-section-header" onclick="toggleSection('instrucoes')">
+      <div>
+        <div class="prompt-section-title">⚙️ Instruções de Geração</div>
+        <div class="prompt-section-sub">Como gerar cada parte: relatórios, fichas, cálculos matemáticos</div>
+      </div>
+      <span class="prompt-chevron open" id="chev-instrucoes">▾</span>
+    </div>
+    <div class="prompt-section-body" id="body-instrucoes">
+      <textarea class="prompt-textarea" id="txt-instrucoes" rows="16">{{ config.instrucoes_geracao }}</textarea>
+    </div>
+  </div>
+
+  <!-- Formato de Saída -->
+  <div class="prompt-section" id="ps-formato">
+    <div class="prompt-section-header" onclick="toggleSection('formato')">
+      <div>
+        <div class="prompt-section-title">📄 Formato de Saída</div>
+        <div class="prompt-section-sub">Template esperado na resposta</div>
+      </div>
+      <span class="prompt-chevron open" id="chev-formato">▾</span>
+    </div>
+    <div class="prompt-section-body" id="body-formato">
+      <textarea class="prompt-textarea" id="txt-formato" rows="8">{{ config.formato_saida }}</textarea>
+    </div>
+  </div>
+
+  <div class="save-row">
+    <button class="btn btn-primary" onclick="salvarPrompt()">Salvar Prompt</button>
+    <span class="save-feedback" id="fb-prompt"></span>
+  </div>
+</div>
+
+<!-- ═══════════════ ABA PARÂMETROS ═══════════════ -->
+<div class="tab-panel" id="tab-parametros">
+
+  <!-- Modelo -->
+  <div class="param-card">
+    <div class="param-label">Modelo da IA</div>
+    <div class="param-desc">Modelo utilizado em todas as conversas e gerações de fichas.</div>
+    <div class="modelo-card">
+      <div style="flex:1">
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;">
+          <div class="modelo-name">GPT-4o</div>
+          <span class="modelo-badge">Ativo</span>
+        </div>
+        <div style="font-size:.8rem;color:var(--cinza3);margin-bottom:4px;">Equilíbrio entre velocidade e qualidade.</div>
+        <div class="modelo-pricing">Input: $0,005 / 1K tokens · Output: $0,015 / 1K tokens</div>
+      </div>
+      <div class="modelo-check">✅</div>
+    </div>
+  </div>
+
+  <!-- Max Tokens -->
+  <div class="param-card">
+    <div class="param-label">Máximo de Tokens por Resposta</div>
+    <div class="param-desc">Limite máximo de tokens na resposta. Mais tokens = respostas mais longas e detalhadas, porém mais caras.</div>
+    <div class="range-value-display" id="disp-tokens">{{ config.max_tokens }}</div>
+    <div class="slider-wrap">
+      <input type="range" class="range-input" id="sl-tokens"
+        min="1000" max="8000" step="100"
+        value="{{ config.max_tokens }}"
+        oninput="updateSlider('tokens', this.value)">
+      <div class="range-labels"><span>1.000</span><span>3.000</span><span>5.000</span><span>8.000</span></div>
+    </div>
+  </div>
+
+  <!-- Temperatura -->
+  <div class="param-card">
+    <div class="param-label">Temperature</div>
+    <div class="param-desc">Controla a criatividade. 0 = mais previsível e conservador, 1 = mais criativo e variado.</div>
+    <div class="range-value-display" id="disp-temp">{{ config.temperatura }}</div>
+    <div class="slider-wrap">
+      <input type="range" class="range-input" id="sl-temp"
+        min="0" max="1" step="0.1"
+        value="{{ config.temperatura }}"
+        oninput="updateSlider('temp', this.value)">
+      <div class="range-labels"><span>0 (Preciso)</span><span>0.5</span><span>1.0 (Criativo)</span></div>
+    </div>
+  </div>
+
+  <!-- Estimativa de custo -->
+  <div class="custo-box">
+    <div class="custo-label">Estimativa de custo por ficha gerada</div>
+    <div class="custo-valor" id="custo-valor">$0.00 <span>USD</span></div>
+    <div class="custo-desc" id="custo-desc">Baseado em ~2.000 tokens de input e <span id="custo-tokens">{{ config.max_tokens }}</span> tokens de output com GPT-4o</div>
+  </div>
+
+  <div class="save-row" style="margin-top:20px">
+    <button class="btn btn-primary" onclick="salvarParametros()">Salvar Parâmetros</button>
+    <span class="save-feedback" id="fb-param"></span>
+  </div>
+</div>
+
+<!-- ═══════════════ ABA PREVIEW ═══════════════ -->
+<div class="tab-panel" id="tab-preview">
+  <div class="preview-wrap">
+
+    <!-- Chat -->
+    <div class="chat-window">
+      <div class="chat-header">
+        <div class="chat-header-title">💬 Chat Preview</div>
+        <button class="btn btn-ghost btn-sm" onclick="limparChat()">Limpar conversa</button>
+      </div>
+      <div class="chat-messages" id="chat-msgs">
+        <div class="msg assistant">👋 Olá! Sou o Mindnutri em modo de teste. Pode conversar comigo como se fosse um cliente.</div>
+      </div>
+      <div class="chat-input-row">
+        <input type="text" class="chat-input" id="chat-input"
+          placeholder="Digite uma mensagem..."
+          onkeydown="if(event.key==='Enter' && !event.shiftKey){ event.preventDefault(); enviarMensagem(); }">
+        <button class="btn btn-primary" onclick="enviarMensagem()">Enviar</button>
+      </div>
+    </div>
+
+    <!-- Info lateral -->
+    <div class="preview-info">
+      <div class="info-chip">
+        <div class="ic-label">Modelo</div>
+        <div class="ic-value">GPT-4o</div>
+      </div>
+      <div class="info-chip">
+        <div class="ic-label">Temperatura</div>
+        <div class="ic-value" id="pr-temp">{{ config.temperatura }}</div>
+      </div>
+      <div class="info-chip">
+        <div class="ic-label">Max Tokens</div>
+        <div class="ic-value" id="pr-tokens">{{ config.max_tokens }}</div>
+      </div>
+      <div class="info-chip">
+        <div class="ic-label">Tokens usados nesta sessão</div>
+        <div class="ic-value" id="pr-total-tokens">0</div>
+        <div class="tokens-bar-wrap">
+          <div class="tokens-bar-bg">
+            <div class="tokens-bar-fill" id="pr-tokens-bar" style="width:0%"></div>
+          </div>
+        </div>
+      </div>
+      <div class="info-chip">
+        <div class="ic-label">Mensagens na sessão</div>
+        <div class="ic-value" id="pr-msg-count">0</div>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<!-- ═══════════════ ABA CONEXÃO ═══════════════ -->
+<div class="tab-panel" id="tab-conexao">
+
+  <!-- Hero: Status da instância -->
+  <div class="status-hero">
+    <div class="status-dot carregando" id="conn-dot"></div>
+    <div>
+      <div class="status-label" id="conn-label">Verificando conexão…</div>
+      <div class="status-sub"   id="conn-sub">Aguardando resposta da Evolution API</div>
+    </div>
+    <div class="status-actions">
+      <button class="btn btn-ghost btn-sm" id="btn-reiniciar"
+              onclick="executarAcao('reiniciar')" disabled>↺ Reiniciar</button>
+      <button class="btn btn-ghost btn-sm" id="btn-desconectar"
+              onclick="executarAcao('desconectar')" disabled
+              style="color:#ef4444">✕ Desconectar</button>
+      <a id="link-evo" href="#" target="_blank" class="btn btn-ghost btn-sm" style="display:none">
+        ↗ Abrir painel Evolution
+      </a>
+    </div>
+  </div>
+
+  <!-- Grid: QR Code | Serviços + Info -->
+  <div class="conexao-grid">
+
+    <!-- QR Code -->
+    <div class="qr-card">
+      <div class="qr-card-title">📱 QR Code de Conexão</div>
+
+      <div id="qr-placeholder" class="qr-placeholder">
+        <span style="font-size:2.4rem">📷</span>
+        <span>Clique em <strong>"Gerar QR Code"</strong><br>para conectar um número</span>
+      </div>
+      <div class="qr-img-box" id="qr-img-box" style="display:none">
+        <img id="qr-img" src="" alt="QR Code WhatsApp">
+      </div>
+
+      <div class="qr-countdown-wrap" id="qr-countdown" style="display:none">
+        <div class="qr-timer-num" id="qr-timer">45</div>
+        <div class="qr-timer-lbl">segundos para expirar</div>
+      </div>
+
+      <div style="display:flex;gap:8px;margin-top:18px">
+        <button class="btn btn-primary" id="btn-gerar-qr" onclick="gerarQRCode()">
+          Gerar QR Code
+        </button>
+        <button class="btn btn-ghost btn-sm" id="btn-refresh-qr"
+                onclick="gerarQRCode()" style="display:none">↻ Atualizar</button>
+      </div>
+
+      <div class="qr-hint">
+        Escaneie com o WhatsApp → <em>Dispositivos conectados</em> → <em>Conectar dispositivo</em>
+      </div>
+    </div>
+
+    <!-- Coluna direita: Serviços + Info Instância -->
+    <div>
+
+      <!-- Status dos Serviços -->
+      <div class="svc-card">
+        <div class="svc-card-title">⚡ Status dos Serviços</div>
+        <div id="svc-list">
+          <div class="svc-row">
+            <div class="svc-dot idle"></div>
+            <div class="svc-name">Evolution API</div>
+            <span class="svc-tag">WhatsApp</span>
+          </div>
+          <div class="svc-row">
+            <div class="svc-dot idle"></div>
+            <div class="svc-name">OpenAI GPT-4o</div>
+            <span class="svc-tag">IA</span>
+          </div>
+          <div class="svc-row">
+            <div class="svc-dot idle"></div>
+            <div class="svc-name">Asaas</div>
+            <span class="svc-tag" id="asaas-env-tag">—</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Info da Instância -->
+      <div class="svc-card">
+        <div class="svc-card-title">🔧 Instância Configurada</div>
+        <div class="inst-row">
+          <span class="inst-key">Nome</span>
+          <span class="inst-val" id="inst-nome">—</span>
+        </div>
+        <div class="inst-row">
+          <span class="inst-key">API URL</span>
+          <span class="inst-val" id="inst-url">—</span>
+        </div>
+        <div class="inst-row">
+          <span class="inst-key">API Key</span>
+          <span class="inst-val" id="inst-key">—</span>
+        </div>
+        <div class="inst-row">
+          <span class="inst-key">Webhook</span>
+          <span class="inst-val" id="inst-webhook">—</span>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <div style="font-size:.7rem;color:var(--cinza3);text-align:right;margin-top:4px">
+    Atualização automática a cada 10s &nbsp;·&nbsp; Última: <span id="conn-updated">—</span>
+  </div>
+
+</div>
+
+<!-- ═══════════════ ABA MENSAGENS ═══════════════ -->
+<div class="tab-panel" id="tab-mensagens">
+  <style>
+    .msgs-container { max-width: 900px; }
+    .msg-categoria { margin-bottom: 18px; border: 1px solid var(--cinza1); border-radius: 10px; overflow: hidden; }
+    .msg-cat-header { padding: 12px 18px; background: var(--cinza05); cursor: pointer; display: flex; justify-content: space-between; align-items: center; font-weight: 600; font-size: .95rem; user-select: none; }
+    .msg-cat-header:hover { background: var(--cinza1); }
+    .msg-cat-header .cat-arrow { transition: transform .2s; }
+    .msg-cat-header.collapsed .cat-arrow { transform: rotate(-90deg); }
+    .msg-cat-body { padding: 0; }
+    .msg-cat-body.hidden { display: none; }
+    .msg-item { padding: 14px 18px; border-top: 1px solid var(--cinza1); }
+    .msg-item:first-child { border-top: none; }
+    .msg-meta { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; flex-wrap: wrap; }
+    .msg-chave { background: var(--cinza1); color: var(--cinza4); font-family: monospace; font-size: .75rem; padding: 2px 8px; border-radius: 4px; }
+    .msg-desc { font-size: .8rem; color: var(--cinza3); flex: 1; }
+    .msg-vars { display: flex; gap: 4px; flex-wrap: wrap; }
+    .msg-var-chip { background: #e8f4fd; color: #1976d2; font-size: .7rem; padding: 1px 6px; border-radius: 3px; font-family: monospace; }
+    .msg-textarea { width: 100%; min-height: 80px; border: 1px solid var(--cinza2); border-radius: 6px; padding: 8px 10px; font-size: .85rem; font-family: inherit; resize: vertical; line-height: 1.4; }
+    .msg-textarea:focus { outline: none; border-color: var(--vermelho); }
+    .msg-actions { display: flex; justify-content: flex-end; margin-top: 6px; }
+    .msg-restore-btn { background: none; border: 1px solid var(--cinza2); color: var(--cinza3); font-size: .75rem; padding: 3px 10px; border-radius: 4px; cursor: pointer; }
+    .msg-restore-btn:hover { border-color: var(--vermelho); color: var(--vermelho); }
+    .msgs-save-bar { position: sticky; bottom: 0; background: white; padding: 14px 0; border-top: 1px solid var(--cinza1); display: flex; justify-content: flex-end; gap: 12px; align-items: center; }
+    .msgs-feedback { font-size: .85rem; color: #2e7d32; }
+    .msgs-feedback.erro { color: #c62828; }
+  </style>
+
+  <div class="msgs-container">
+    <div id="msgs-loading" style="text-align:center;padding:40px;color:var(--cinza3)">Carregando mensagens...</div>
+    <div id="msgs-list"></div>
+    <div class="msgs-save-bar" id="msgs-save-bar" style="display:none">
+      <span class="msgs-feedback" id="msgs-feedback"></span>
+      <button class="btn btn-primary" onclick="salvarMensagens()">Salvar todas as mensagens</button>
+    </div>
+  </div>
+</div>
+
+<script>
+const CSRF = '{{ csrf_token }}';
+
+// ── ABAS ────────────────────────────────────────────────────
+document.querySelectorAll('.tab-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+    document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
+    btn.classList.add('active');
+    document.getElementById('tab-' + btn.dataset.tab).classList.add('active');
+  });
+});
+
+// ── SEÇÕES DO PROMPT (colapsar) ─────────────────────────────
+function toggleSection(id) {
+  const body = document.getElementById('body-' + id);
+  const chev = document.getElementById('chev-' + id);
+  const hidden = body.style.display === 'none';
+  body.style.display = hidden ? '' : 'none';
+  chev.classList.toggle('open', hidden);
+}
+
+// ── SALVAR PROMPT ───────────────────────────────────────────
+async function salvarPrompt() {
+  const payload = {
+    persona:            document.getElementById('txt-persona').value,
+    metodologia:        document.getElementById('txt-metodologia').value,
+    instrucoes_geracao: document.getElementById('txt-instrucoes').value,
+    formato_saida:      document.getElementById('txt-formato').value,
+  };
+  const fb = document.getElementById('fb-prompt');
+  try {
+    const r = await fetch('{% url "api_salvar_prompt" %}', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json', 'X-CSRFToken': CSRF},
+      body: JSON.stringify(payload),
+    });
+    const d = await r.json();
+    fb.textContent = d.ok ? '✓ Prompt salvo com sucesso!' : '✗ Erro: ' + d.erro;
+    fb.className = 'save-feedback show' + (d.ok ? '' : ' erro');
+  } catch(e) {
+    fb.textContent = '✗ Erro de conexão';
+    fb.className = 'save-feedback show erro';
+  }
+  setTimeout(() => fb.classList.remove('show'), 3000);
+}
+
+// ── SLIDERS ─────────────────────────────────────────────────
+function updateSlider(tipo, val) {
+  if (tipo === 'tokens') {
+    document.getElementById('disp-tokens').textContent = parseInt(val).toLocaleString('pt-BR');
+    document.getElementById('custo-tokens').textContent = val;
+    document.getElementById('pr-tokens').textContent = val;
+    calcularCusto();
+    atualizarSliderCSS('sl-tokens', 1000, 8000, val);
+  } else {
+    const v = parseFloat(val).toFixed(1);
+    document.getElementById('disp-temp').textContent = v;
+    document.getElementById('pr-temp').textContent = v;
+    atualizarSliderCSS('sl-temp', 0, 1, val);
+  }
+}
+
+function atualizarSliderCSS(id, min, max, val) {
+  const el = document.getElementById(id);
+  const pct = ((val - min) / (max - min) * 100).toFixed(1) + '%';
+  el.style.setProperty('--pct', pct);
+}
+
+function calcularCusto() {
+  const tokens = parseInt(document.getElementById('sl-tokens').value);
+  const inputTokens  = 2000;
+  const inputPrice   = 0.005 / 1000;
+  const outputPrice  = 0.015 / 1000;
+  const custo = (inputTokens * inputPrice) + (tokens * outputPrice);
+  document.getElementById('custo-valor').innerHTML =
+    '$' + custo.toFixed(4) + ' <span>USD</span>';
+}
+
+// Inicializar sliders ao carregar
+(function() {
+  const tokensEl = document.getElementById('sl-tokens');
+  const tempEl   = document.getElementById('sl-temp');
+  atualizarSliderCSS('sl-tokens', 1000, 8000, tokensEl.value);
+  atualizarSliderCSS('sl-temp', 0, 1, tempEl.value);
+  calcularCusto();
+  // Formatar display de tokens com ponto de milhar
+  document.getElementById('disp-tokens').textContent = parseInt(tokensEl.value).toLocaleString('pt-BR');
+})();
+
+// ── SALVAR PARÂMETROS ───────────────────────────────────────
+async function salvarParametros() {
+  const payload = {
+    max_tokens:  document.getElementById('sl-tokens').value,
+    temperatura: document.getElementById('sl-temp').value,
+  };
+  const fb = document.getElementById('fb-param');
+  try {
+    const r = await fetch('{% url "api_salvar_parametros" %}', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json', 'X-CSRFToken': CSRF},
+      body: JSON.stringify(payload),
+    });
+    const d = await r.json();
+    fb.textContent = d.ok ? '✓ Parâmetros salvos!' : '✗ Erro: ' + d.erro;
+    fb.className = 'save-feedback show' + (d.ok ? '' : ' erro');
+  } catch(e) {
+    fb.textContent = '✗ Erro de conexão';
+    fb.className = 'save-feedback show erro';
+  }
+  setTimeout(() => fb.classList.remove('show'), 3000);
+}
+
+// ── CHAT PREVIEW ────────────────────────────────────────────
+let chatHistorico  = [];
+let totalTokensSessao = 0;
+let msgCount = 0;
+
+function limparChat() {
+  chatHistorico = [];
+  totalTokensSessao = 0;
+  msgCount = 0;
+  const msgs = document.getElementById('chat-msgs');
+  msgs.innerHTML = '<div class="msg assistant">👋 Olá! Sou o Mindnutri em modo de teste. Pode conversar comigo como se fosse um cliente.</div>';
+  document.getElementById('pr-total-tokens').textContent = '0';
+  document.getElementById('pr-tokens-bar').style.width = '0%';
+  document.getElementById('pr-msg-count').textContent = '0';
+}
+
+function appendMsg(role, text) {
+  const msgs = document.getElementById('chat-msgs');
+  const div = document.createElement('div');
+  div.className = 'msg ' + role;
+  div.textContent = text;
+  msgs.appendChild(div);
+  msgs.scrollTop = msgs.scrollHeight;
+  return div;
+}
+
+async function enviarMensagem() {
+  const input = document.getElementById('chat-input');
+  const texto = input.value.trim();
+  if (!texto) return;
+
+  input.value = '';
+  input.disabled = true;
+
+  appendMsg('user', texto);
+  msgCount++;
+
+  // indicador de digitação
+  const typing = appendMsg('typing', 'Digitando...');
+
+  try {
+    const r = await fetch('{% url "api_preview_chat" %}', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json', 'X-CSRFToken': CSRF},
+      body: JSON.stringify({ mensagem: texto, historico: chatHistorico }),
+    });
+    const d = await r.json();
+    typing.remove();
+
+    if (d.ok) {
+      appendMsg('assistant', d.resposta);
+      chatHistorico.push({ role: 'user',      content: texto      });
+      chatHistorico.push({ role: 'assistant', content: d.resposta });
+
+      totalTokensSessao += d.tokens_usados || 0;
+      const maxTk = parseInt(document.getElementById('pr-tokens').textContent) || 3000;
+      const pct   = Math.min(100, (totalTokensSessao / (maxTk * 5)) * 100);
+      document.getElementById('pr-total-tokens').textContent = totalTokensSessao.toLocaleString('pt-BR');
+      document.getElementById('pr-tokens-bar').style.width = pct + '%';
+    } else {
+      appendMsg('typing', '⚠️ Erro: ' + d.erro);
+    }
+  } catch(e) {
+    typing.remove();
+    appendMsg('typing', '⚠️ Erro de conexão com o servidor.');
+  }
+
+  document.getElementById('pr-msg-count').textContent = msgCount;
+  input.disabled = false;
+  input.focus();
+}
+
+// ── CONEXÃO WHATSAPP ────────────────────────────────────────
+let _statusInterval = null;
+let _qrInterval    = null;
+let _qrSeconds     = 45;
+
+async function carregarStatusConexao() {
+  try {
+    const r = await fetch('{% url "api_conexao_status" %}');
+    const d = await r.json();
+    if (!d.ok) return;
+
+    const dot   = document.getElementById('conn-dot');
+    const label = document.getElementById('conn-label');
+    const sub   = document.getElementById('conn-sub');
+    const wa    = d.whatsapp || {};
+
+    // Status dot + texto
+    if (wa.connected) {
+      dot.className = 'status-dot conectado';
+      label.textContent = 'Conectado';
+      sub.textContent   = 'WhatsApp online · instância: ' + (d.config?.instancia || '');
+    } else if (wa.state === 'connecting') {
+      dot.className = 'status-dot conectando';
+      label.textContent = 'Conectando…';
+      sub.textContent   = 'Aguardando emparelhamento';
+    } else {
+      dot.className = 'status-dot desconectado';
+      label.textContent = 'Desconectado';
+      sub.textContent   = wa.erro ? 'Erro: ' + wa.erro : 'WhatsApp offline — gere o QR Code para reconectar';
+    }
+
+    // Botões de ação
+    document.getElementById('btn-desconectar').disabled = false;
+    document.getElementById('btn-reiniciar').disabled   = false;
+
+    // Link painel Evolution
+    if (d.config?.painel_url) {
+      const lnk = document.getElementById('link-evo');
+      lnk.href = d.config.painel_url;
+      lnk.style.display = '';
+    }
+
+    // Services
+    const evoOk = d.whatsapp?.ok;
+    const aiOk  = d.openai?.ok;
+    const asOk  = d.asaas?.ok;
+    const asEnv = d.asaas?.env || 'sandbox';
+    document.getElementById('svc-list').innerHTML = `
+      <div class="svc-row">
+        <div class="svc-dot ${evoOk ? 'ok' : 'erro'}"></div>
+        <div class="svc-name">Evolution API</div>
+        <span class="svc-tag">WhatsApp</span>
+      </div>
+      <div class="svc-row">
+        <div class="svc-dot ${aiOk ? 'ok' : 'erro'}"></div>
+        <div class="svc-name">OpenAI GPT-4o</div>
+        <span class="svc-tag">IA</span>
+      </div>
+      <div class="svc-row">
+        <div class="svc-dot ${asOk ? 'ok' : 'erro'}"></div>
+        <div class="svc-name">Asaas</div>
+        <span class="svc-tag">${asEnv}</span>
+      </div>
+    `;
+
+    // Info instância
+    if (d.config) {
+      document.getElementById('inst-nome').textContent    = d.config.instancia    || '—';
+      document.getElementById('inst-url').textContent     = d.config.api_url      || '—';
+      document.getElementById('inst-key').textContent     = d.config.api_key_masked || '—';
+      document.getElementById('inst-webhook').textContent = d.config.webhook_url  || '—';
+    }
+
+    document.getElementById('conn-updated').textContent =
+      new Date().toLocaleTimeString('pt-BR');
+
+  } catch(e) {
+    console.error('Erro ao buscar status da conexão:', e);
+  }
+}
+
+async function gerarQRCode() {
+  const btnGerar   = document.getElementById('btn-gerar-qr');
+  const btnRefresh = document.getElementById('btn-refresh-qr');
+  btnGerar.disabled = true;
+  btnGerar.textContent = 'Gerando…';
+
+  // Para timer anterior
+  if (_qrInterval) { clearInterval(_qrInterval); _qrInterval = null; }
+
+  try {
+    const r = await fetch('{% url "api_conexao_qrcode" %}');
+    const d = await r.json();
+
+    if (d.ok && d.base64) {
+      // Mostrar QR Code
+      document.getElementById('qr-placeholder').style.display = 'none';
+      const box = document.getElementById('qr-img-box');
+      box.style.display = 'block';
+      document.getElementById('qr-img').src = d.base64;
+
+      // Countdown
+      _qrSeconds = 45;
+      document.getElementById('qr-timer').textContent = _qrSeconds;
+      document.getElementById('qr-countdown').style.display = 'block';
+      btnGerar.style.display = 'none';
+      btnRefresh.style.display = 'block';
+
+      _qrInterval = setInterval(() => {
+        _qrSeconds--;
+        document.getElementById('qr-timer').textContent = _qrSeconds;
+        if (_qrSeconds <= 0) {
+          clearInterval(_qrInterval); _qrInterval = null;
+          // Expirado — volta ao estado inicial
+          box.style.display = 'none';
+          document.getElementById('qr-countdown').style.display = 'none';
+          document.getElementById('qr-placeholder').style.display = 'flex';
+          btnGerar.style.display = 'block';
+          btnGerar.disabled = false;
+          btnGerar.textContent = 'Gerar novo QR Code';
+          btnRefresh.style.display = 'none';
+        }
+      }, 1000);
+
+    } else if (d.ok && !d.base64) {
+      alert('WhatsApp já está conectado, ou o QR Code não está disponível no momento.\nVerifique o status acima.');
+    } else {
+      alert('Erro ao gerar QR Code: ' + (d.erro || 'resposta inesperada da API'));
+    }
+  } catch(e) {
+    alert('Erro de comunicação: ' + e.message);
+  }
+
+  if (document.getElementById('qr-img-box').style.display === 'none') {
+    btnGerar.disabled = false;
+    btnGerar.textContent = 'Gerar QR Code';
+  }
+}
+
+async function executarAcao(acao) {
+  const msgs = {
+    desconectar: 'Desconectar o WhatsApp? O bot ficará offline até novo emparelhamento.',
+    reiniciar:   'Reiniciar a instância WhatsApp agora?',
+  };
+  if (!confirm(msgs[acao])) return;
+
+  try {
+    const r = await fetch('{% url "api_conexao_acao" %}', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json', 'X-CSRFToken': CSRF},
+      body: JSON.stringify({ acao }),
+    });
+    const d = await r.json();
+    if (d.ok) {
+      setTimeout(carregarStatusConexao, 2500);
+    } else {
+      alert('Erro: ' + (d.erro || 'desconhecido'));
+    }
+  } catch(e) {
+    alert('Erro de conexão: ' + e.message);
+  }
+}
+
+// Ligar/desligar polling ao mudar de aba
+document.querySelectorAll('.tab-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    if (btn.dataset.tab === 'conexao') {
+      carregarStatusConexao();
+      _statusInterval = _statusInterval || setInterval(carregarStatusConexao, 10000);
+    } else {
+      if (_statusInterval) { clearInterval(_statusInterval); _statusInterval = null; }
+    }
+    if (btn.dataset.tab === 'mensagens' && !_msgsCarregadas) {
+      carregarMensagens();
+    }
+    if (btn.dataset.tab === 'perdas' && !perdasCarregadas) {
+      carregarPerdas();
+    }
+  });
+});
+
+// ── MENSAGENS DO BOT ────────────────────────────────────────
+let _msgsCarregadas = false;
+let _msgsData = {};
+
+const CAT_LABELS = {
+  'boas_vindas': '👋 Boas-vindas',
+  'menu': '📋 Menu Principal',
+  'coleta': '📝 Coleta de Dados',
+  'pagamento': '💳 Pagamento',
+  'fichas': '📊 Fichas Técnicas',
+  'operacional': '📄 Ficha Operacional (PDF)',
+  'erros': '⚠️ Erros e Alertas',
+  'renovacao': '🔄 Renovação',
+  'webhook': '🔔 Webhook / Pós-pagamento',
+};
+
+const CAT_ORDER = ['boas_vindas','menu','coleta','pagamento','fichas','operacional','erros','renovacao','webhook'];
+
+async function carregarMensagens() {
+  const loading = document.getElementById('msgs-loading');
+  const list = document.getElementById('msgs-list');
+  const bar = document.getElementById('msgs-save-bar');
+
+  try {
+    const r = await fetch('{% url "api_mensagens" %}');
+    const d = await r.json();
+    if (!d.ok) throw new Error(d.erro);
+
+    _msgsData = d.grupos;
+    _msgsCarregadas = true;
+    loading.style.display = 'none';
+    bar.style.display = 'flex';
+
+    let html = '';
+    for (const catKey of CAT_ORDER) {
+      const grupo = _msgsData[catKey];
+      if (!grupo || !grupo.mensagens.length) continue;
+
+      html += `<div class="msg-categoria">
+        <div class="msg-cat-header" onclick="toggleCat(this)">
+          <span>${CAT_LABELS[catKey] || grupo.label} (${grupo.mensagens.length})</span>
+          <span class="cat-arrow">▼</span>
+        </div>
+        <div class="msg-cat-body">`;
+
+      for (const m of grupo.mensagens) {
+        const vars = m.variaveis ? m.variaveis.split(',').map(v =>
+          `<span class="msg-var-chip">{${v.trim()}}</span>`
+        ).join('') : '';
+
+        html += `<div class="msg-item">
+          <div class="msg-meta">
+            <span class="msg-chave">${m.chave}</span>
+            <span class="msg-desc">${m.descricao}</span>
+            ${vars ? '<div class="msg-vars">' + vars + '</div>' : ''}
+          </div>
+          <textarea class="msg-textarea" data-chave="${m.chave}">${escapeHtml(m.texto)}</textarea>
+          <div class="msg-actions">
+            <button class="msg-restore-btn" onclick="restaurarMensagem('${m.chave}', this)">Restaurar padrão</button>
+          </div>
+        </div>`;
+      }
+
+      html += '</div></div>';
+    }
+
+    list.innerHTML = html;
+
+  } catch (e) {
+    loading.textContent = 'Erro ao carregar: ' + e.message;
+    loading.style.color = '#c62828';
+  }
+}
+
+function toggleCat(header) {
+  header.classList.toggle('collapsed');
+  const body = header.nextElementSibling;
+  body.classList.toggle('hidden');
+}
+
+function escapeHtml(text) {
+  const div = document.createElement('div');
+  div.textContent = text;
+  return div.innerHTML;
+}
+
+async function salvarMensagens() {
+  const fb = document.getElementById('msgs-feedback');
+  const textareas = document.querySelectorAll('.msg-textarea');
+  const payload = {};
+
+  textareas.forEach(ta => {
+    payload[ta.dataset.chave] = ta.value;
+  });
+
+  try {
+    fb.textContent = 'Salvando...';
+    fb.className = 'msgs-feedback';
+
+    const r = await fetch('{% url "api_salvar_mensagens" %}', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json', 'X-CSRFToken': CSRF},
+      body: JSON.stringify(payload),
+    });
+    const d = await r.json();
+
+    if (d.ok) {
+      fb.textContent = `✓ ${d.atualizados} mensagens salvas`;
+      fb.className = 'msgs-feedback';
+    } else {
+      fb.textContent = 'Erro: ' + d.erro;
+      fb.className = 'msgs-feedback erro';
+    }
+  } catch (e) {
+    fb.textContent = 'Erro: ' + e.message;
+    fb.className = 'msgs-feedback erro';
+  }
+
+  setTimeout(() => { fb.textContent = ''; }, 4000);
+}
+
+async function restaurarMensagem(chave, btn) {
+  if (!confirm('Restaurar esta mensagem ao texto padrão?')) return;
+
+  try {
+    const r = await fetch('{% url "api_restaurar_mensagem" %}', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json', 'X-CSRFToken': CSRF},
+      body: JSON.stringify({chave}),
+    });
+    const d = await r.json();
+
+    if (d.ok) {
+      const ta = document.querySelector(`textarea[data-chave="${chave}"]`);
+      if (ta) ta.value = d.texto;
+      btn.textContent = '✓ Restaurado';
+      setTimeout(() => { btn.textContent = 'Restaurar padrão'; }, 2000);
+    } else {
+      alert('Erro: ' + d.erro);
+    }
+  } catch (e) {
+    alert('Erro: ' + e.message);
+  }
+}
+
+// ── ABA PERDAS ──────────────────────────────────────────
+let perdasCarregadas = false;
+let perdasData = [];
+let perdasCategorias = {};
+let perdasAlteradas = {};
+
+async function carregarPerdas() {
+  if (perdasCarregadas) return;
+  const container = document.getElementById('perdas-container');
+  container.innerHTML = '<p style="color:var(--cinza3)">Carregando...</p>';
+  try {
+    const r = await fetch('{% url "api_perdas" %}');
+    const d = await r.json();
+    perdasData = d.perdas || [];
+    perdasCategorias = d.categorias || {};
+    perdasCarregadas = true;
+    renderPerdas();
+  } catch(e) {
+    container.innerHTML = '<p style="color:var(--vermelho)">Erro ao carregar perdas.</p>';
+  }
+}
+
+function renderPerdas(filtro = '') {
+  const container = document.getElementById('perdas-container');
+  const filtroLower = filtro.toLowerCase();
+  const agrupadas = {};
+  for (const p of perdasData) {
+    if (filtroLower && !p.nome.toLowerCase().includes(filtroLower)) continue;
+    if (!agrupadas[p.categoria]) agrupadas[p.categoria] = [];
+    agrupadas[p.categoria].push(p);
+  }
+
+  let html = '';
+  for (const [cat, label] of Object.entries(perdasCategorias)) {
+    const items = agrupadas[cat] || [];
+    if (items.length === 0 && filtroLower) continue;
+    html += `<div style="margin-bottom:10px">
+      <div class="cat-header" onclick="togglePerdaCat('${cat}')">
+        <span class="cat-title">${escapeHtml(label)}</span>
+        <span class="cat-count">${items.length}</span>
+      </div>
+      <div id="perda-cat-${cat}" style="display:none;background:var(--card);border:1px solid var(--borda);border-top:none;border-radius:0 0 var(--r) var(--r);overflow:hidden">`;
+    for (const p of items) {
+      const key = p.nome.replace(/'/g, "\\'");
+      const val = p.perda_percentual;
+      const isGanho = val < 0;
+      const badge = val === 0 ? '' :
+        isGanho ? `<span style="font-size:.72rem;padding:1px 6px;border-radius:4px;background:#e8f5e9;color:#2e7d32;font-weight:500">+${Math.abs(val)}%</span>` :
+        `<span style="font-size:.72rem;padding:1px 6px;border-radius:4px;background:#ffebee;color:#c62828;font-weight:500">-${val}%</span>`;
+      html += `<div class="perda-row">
+        <span class="perda-nome">${escapeHtml(p.nome)} ${badge}</span>
+        <input type="number" min="-1000" max="100" value="${val}"
+          onchange="marcarPerdaAlterada('${key}', this.value, this.parentElement.querySelector('select').value)"
+          class="perdas-input" style="width:70px;text-align:center">
+        <span style="font-size:.78rem;color:var(--cinza3)">%</span>
+        <select onchange="marcarPerdaAlterada('${key}', this.parentElement.querySelector('input').value, this.value)"
+          class="perdas-select">
+          <option value="nenhuma" ${p.tipo_perda==='nenhuma'?'selected':''}>Nenhuma</option>
+          <option value="limpeza" ${p.tipo_perda==='limpeza'?'selected':''}>Limpeza</option>
+          <option value="coccao" ${p.tipo_perda==='coccao'||p.tipo_perda==='cocção'?'selected':''}>Cocção</option>
+          <option value="ganho" ${p.tipo_perda==='ganho'?'selected':''}>Ganho (absorve água)</option>
+        </select>
+        <button onclick="excluirPerda('${key}')" class="perda-btn-del" title="Excluir">✕</button>
+      </div>`;
+    }
+    html += '</div></div>';
+  }
+  container.innerHTML = html || '<p style="color:var(--cinza3)">Nenhum ingrediente encontrado.</p>';
+}
+
+function togglePerdaCat(cat) {
+  const el = document.getElementById('perda-cat-' + cat);
+  el.style.display = el.style.display === 'none' ? 'block' : 'none';
+}
+
+function marcarPerdaAlterada(nome, perda, tipo) {
+  perdasAlteradas[nome] = { nome: nome, perda_percentual: parseInt(perda) || 0, tipo_perda: tipo };
+  document.getElementById('btn-salvar-perdas').style.opacity = '1';
+}
+
+async function salvarPerdas() {
+  const alteracoes = Object.values(perdasAlteradas);
+  if (alteracoes.length === 0) return;
+  const btn = document.getElementById('btn-salvar-perdas');
+  btn.textContent = 'Salvando...';
+  try {
+    const r = await fetch('{% url "api_salvar_perdas" %}', {
+      method: 'POST',
+      headers: {'Content-Type':'application/json','X-CSRFToken': document.querySelector('[name=csrfmiddlewaretoken]').value},
+      body: JSON.stringify({alteracoes})
+    });
+    const d = await r.json();
+    if (d.ok) {
+      btn.textContent = `✓ ${d.salvas} salvas`;
+      perdasAlteradas = {};
+      // atualizar dados locais
+      for (const alt of alteracoes) {
+        const p = perdasData.find(x => x.nome === alt.nome);
+        if (p) { p.perda_percentual = alt.perda_percentual; p.tipo_perda = alt.tipo_perda; }
+      }
+      setTimeout(() => { btn.textContent = 'Salvar alterações'; btn.style.opacity = '.6'; }, 2000);
+    }
+  } catch(e) { btn.textContent = 'Erro!'; }
+}
+
+function toggleFormPerda() {
+  const form = document.getElementById('form-nova-perda');
+  form.style.display = form.style.display === 'none' ? 'flex' : 'none';
+  if (form.style.display === 'flex') document.getElementById('nova-perda-nome').focus();
+}
+
+async function adicionarPerda() {
+  const nome = document.getElementById('nova-perda-nome').value.trim();
+  const perda = parseInt(document.getElementById('nova-perda-pct').value) || 0;
+  const tipo = document.getElementById('nova-perda-tipo').value;
+  const cat = document.getElementById('nova-perda-cat').value;
+  const btn = document.getElementById('btn-add-perda');
+
+  if (!nome) { document.getElementById('nova-perda-nome').style.borderColor = 'var(--vermelho)'; return; }
+
+  btn.textContent = 'Salvando...';
+  btn.disabled = true;
+  try {
+    const r = await fetch('{% url "api_adicionar_perda" %}', {
+      method: 'POST',
+      headers: {'Content-Type':'application/json','X-CSRFToken': document.querySelector('[name=csrfmiddlewaretoken]').value},
+      body: JSON.stringify({nome, perda_percentual: perda, tipo_perda: tipo, categoria: cat})
+    });
+    const d = await r.json();
+    if (d.ok) {
+      perdasData.push({nome, categoria: cat, perda_percentual: perda, tipo_perda: tipo});
+      renderPerdas(document.getElementById('perdas-filtro').value);
+      document.getElementById('nova-perda-nome').value = '';
+      document.getElementById('nova-perda-pct').value = '0';
+      btn.textContent = 'Adicionado!';
+      setTimeout(() => { btn.textContent = 'Adicionar'; btn.disabled = false; }, 1500);
+    } else {
+      btn.textContent = d.erro || 'Erro';
+      setTimeout(() => { btn.textContent = 'Adicionar'; btn.disabled = false; }, 2000);
+    }
+  } catch(e) {
+    btn.textContent = 'Erro!';
+    setTimeout(() => { btn.textContent = 'Adicionar'; btn.disabled = false; }, 2000);
+  }
+}
+
+async function excluirPerda(nome) {
+  if (!confirm(`Excluir "${nome}" da base de perdas?`)) return;
+  try {
+    const r = await fetch('{% url "api_excluir_perda" %}', {
+      method: 'POST',
+      headers: {'Content-Type':'application/json','X-CSRFToken': document.querySelector('[name=csrfmiddlewaretoken]').value},
+      body: JSON.stringify({nome})
+    });
+    const d = await r.json();
+    if (d.ok) {
+      perdasData = perdasData.filter(p => p.nome !== nome);
+      renderPerdas(document.getElementById('perdas-filtro').value);
+    }
+  } catch(e) { alert('Erro: ' + e.message); }
+}
+</script>
+
+<!-- ═══════════════ ABA PERDAS ═══════════════ -->
+<style>
+.perdas-input {
+  padding:7px 10px;border:1px solid var(--borda);border-radius:var(--r);
+  background:var(--card);color:#333;font-size:.85rem;font-family:'DM Sans',sans-serif;
+}
+.perdas-input:focus { border-color:var(--vermelho);outline:none; }
+.perdas-select {
+  padding:7px 10px;border:1px solid var(--borda);border-radius:var(--r);
+  background:var(--card);color:#333;font-size:.82rem;font-family:'DM Sans',sans-serif;
+  cursor:pointer;
+}
+.perdas-select:focus { border-color:var(--vermelho);outline:none; }
+#form-nova-perda {
+  display:none;flex-wrap:wrap;gap:10px;padding:16px;margin-bottom:16px;
+  background:var(--card);border:1px solid var(--borda);border-radius:var(--r2);
+  box-shadow:var(--sombra);
+}
+#form-nova-perda .form-row { display:flex;gap:10px;align-items:center;width:100%; }
+#form-nova-perda .form-label { font-size:.78rem;color:var(--cinza3);margin-bottom:3px; }
+#form-nova-perda .form-group { display:flex;flex-direction:column; }
+.perda-row {
+  display:flex;align-items:center;gap:10px;padding:8px 14px;
+  border-bottom:1px solid var(--bg);transition:background .15s;
+}
+.perda-row:hover { background:var(--bg); }
+.perda-row .perda-nome { flex:1;font-size:.85rem;color:#333; }
+.perda-btn-del {
+  background:none;border:none;color:var(--cinza3);cursor:pointer;
+  font-size:.9rem;padding:4px 6px;border-radius:4px;transition:all .15s;
+}
+.perda-btn-del:hover { color:var(--vermelho);background:rgba(204,0,0,.08); }
+.cat-header {
+  cursor:pointer;padding:10px 14px;background:var(--bg);border-radius:var(--r);
+  display:flex;justify-content:space-between;align-items:center;transition:background .15s;
+}
+.cat-header:hover { background:var(--borda); }
+.cat-header .cat-title { font-weight:600;font-size:.9rem;color:#333; }
+.cat-header .cat-count {
+  font-size:.75rem;color:var(--cinza3);background:var(--card);
+  padding:2px 8px;border-radius:10px;border:1px solid var(--borda);
+}
+</style>
+
+<div class="tab-panel" id="tab-perdas">
+  <div style="font-size:.82rem;color:var(--cinza3);margin-bottom:16px;">
+    Base de conhecimento de FC/IC. Valores positivos = perda de peso (limpeza/cocção). Valores negativos = ganho de peso (absorção de água). Ex: Arroz -200% = triplica o peso ao cozinhar.
+  </div>
+
+  <!-- Toolbar -->
+  <div style="display:flex;gap:10px;margin-bottom:16px;align-items:center">
+    <input type="text" id="perdas-filtro" placeholder="Buscar ingrediente..."
+      oninput="renderPerdas(this.value)"
+      class="perdas-input" style="flex:1">
+    <button onclick="toggleFormPerda()" style="padding:7px 16px;background:var(--vermelho);color:#fff;border:none;border-radius:var(--r);cursor:pointer;font-size:.85rem;font-weight:500;font-family:'DM Sans',sans-serif">+ Novo ingrediente</button>
+    <button id="btn-salvar-perdas" onclick="salvarPerdas()" style="padding:7px 16px;background:#333;color:#fff;border:none;border-radius:var(--r);cursor:pointer;font-size:.85rem;font-weight:500;opacity:.4;font-family:'DM Sans',sans-serif;transition:opacity .2s">Salvar</button>
+  </div>
+
+  <!-- Form inline -->
+  <div id="form-nova-perda">
+    <div class="form-row">
+      <div class="form-group" style="flex:2">
+        <span class="form-label">Nome do ingrediente</span>
+        <input type="text" id="nova-perda-nome" class="perdas-input" placeholder="Ex: Costela suina" style="width:100%">
+      </div>
+      <div class="form-group" style="flex:0 0 80px">
+        <span class="form-label">Perda %</span>
+        <input type="number" id="nova-perda-pct" class="perdas-input" value="0" min="-1000" max="100" style="width:100%;text-align:center">
+      </div>
+      <div class="form-group" style="flex:1">
+        <span class="form-label">Tipo de perda</span>
+        <select id="nova-perda-tipo" class="perdas-select" style="width:100%">
+          <option value="coccao">Cocção (perde)</option>
+          <option value="limpeza">Limpeza (perde)</option>
+          <option value="ganho">Ganho (absorve água)</option>
+          <option value="nenhuma">Nenhuma</option>
+        </select>
+      </div>
+      <div class="form-group" style="flex:1">
+        <span class="form-label">Categoria</span>
+        <select id="nova-perda-cat" class="perdas-select" style="width:100%">
+          <option value="carnes">Carnes e Proteinas</option>
+          <option value="laticinios">Laticinios e Ovos</option>
+          <option value="vegetais">Vegetais e Legumes</option>
+          <option value="frutas">Frutas</option>
+          <option value="graos">Graos e Cereais</option>
+          <option value="padaria">Farinhas e Panificacao</option>
+          <option value="oleos_molhos">Oleos, Gorduras e Molhos</option>
+          <option value="doces">Acucar e Doces</option>
+        </select>
+      </div>
+      <div class="form-group" style="justify-content:flex-end;padding-top:16px">
+        <button id="btn-add-perda" onclick="adicionarPerda()" style="padding:7px 20px;background:var(--vermelho);color:#fff;border:none;border-radius:var(--r);cursor:pointer;font-size:.85rem;font-weight:500;font-family:'DM Sans',sans-serif;white-space:nowrap">Adicionar</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="perdas-container"></div>
+</div>
+
+{% endblock %}

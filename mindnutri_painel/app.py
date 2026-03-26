@@ -17,6 +17,6 @@ ASSINANTES = [
         "nicho": "Hambúrguer", "telefone": "+55 11 99876-5432",
         "instagram": "@burgerbros.sp", "cidade": "São Paulo - SP",
         "funcionarios": 8, "faturamento": "R$ 45.000",
-        "status": "ativo", "plano": "Mensal R$59,90",
+        "status": "ativo", "plano": "Mensal R$89,90",
         "fichas_geradas": 18, "fichas_limite": 30,
         "data_inicio": "2024-02-10", "proxima_cobranca": "2024-03

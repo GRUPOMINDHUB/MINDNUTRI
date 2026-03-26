@@ -1,8 +1,10 @@
+import logging
 import requests
 import base64
 import os
-import tempfile
 from django.conf import settings as config
+
+logger = logging.getLogger(__name__)
 
 HEADERS = {
     "apikey": config.EVOLUTION_API_KEY,
@@ -10,6 +12,15 @@ HEADERS = {
 }
 BASE = f"{config.EVOLUTION_API_URL}/message"
 INST = config.EVOLUTION_INSTANCE
+
+_MIME_TYPES: dict[str, str] = {
+    ".pdf":  "application/pdf",
+    ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    ".png":  "image/png",
+    ".jpg":  "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".webp": "image/webp",
+}
 
 
 def _post(endpoint: str, payload: dict) -> dict:
@@ -21,7 +32,7 @@ def _post(endpoint: str, payload: dict) -> dict:
     except Exception as e:
         safe_endpoint = str(endpoint).encode('utf-8', 'ignore').decode('utf-8')
         safe_msg = str(e).encode('utf-8', 'ignore').decode('utf-8')
-        print(f"[Evolution] Erro em {safe_endpoint}: {safe_msg}")
+        logger.error("[Evolution] Erro em %s: %s", safe_endpoint, safe_msg)
         return {}
 
 
@@ -36,13 +47,7 @@ def enviar_texto(telefone: str, texto: str) -> dict:
 def enviar_arquivo(telefone: str, caminho: str, caption: str = "") -> dict:
     """Envia arquivo (PDF ou XLSX) como documento."""
     ext = os.path.splitext(caminho)[1].lower()
-    mime_map = {
-        ".pdf":  "application/pdf",
-        ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        ".png":  "image/png",
-        ".jpg":  "image/jpeg",
-    }
-    mimetype = mime_map.get(ext, "application/octet-stream")
+    mimetype = _MIME_TYPES.get(ext, "application/octet-stream")
     nome_arquivo = os.path.basename(caminho)
 
     with open(caminho, "rb") as f:
@@ -61,13 +66,7 @@ def enviar_arquivo(telefone: str, caminho: str, caption: str = "") -> dict:
 def enviar_imagem(telefone: str, caminho: str, caption: str = "") -> dict:
     """Envia imagem."""
     ext = os.path.splitext(caminho)[1].lower()
-    mime_map = {
-        ".png": "image/png",
-        ".jpg": "image/jpeg",
-        ".jpeg": "image/jpeg",
-        ".webp": "image/webp",
-    }
-    mimetype = mime_map.get(ext, "image/jpeg")
+    mimetype = _MIME_TYPES.get(ext, "image/jpeg")
     nome_arquivo = os.path.basename(caminho)
 
     with open(caminho, "rb") as f:
@@ -83,21 +82,42 @@ def enviar_imagem(telefone: str, caminho: str, caption: str = "") -> dict:
     })
 
 
-def baixar_midia(media_url: str, media_key: str = None) -> bytes | None:
-    """Baixa mídia (áudio, imagem, documento) da Evolution API."""
+def baixar_midia(media_url: str = None, media_key: str = None,
+                 mensagem_completa: dict = None) -> bytes | None:
+    """
+    Baixa mídia (áudio, imagem, documento) da Evolution API.
+    Extrai key da mensagem_completa se disponível, senão usa media_key.
+    """
     try:
-        # Evolution API endpoint para download de mídia
         url = f"{config.EVOLUTION_API_URL}/chat/getBase64FromMediaMessage/{INST}"
-        r = requests.post(url, json={"message": {"key": {"id": media_key}}},
-                          headers=HEADERS, timeout=30)
-        if r.status_code == 200:
+
+        # Monta a key para o download
+        if mensagem_completa and "key" in mensagem_completa:
+            msg_key = mensagem_completa["key"]
+        else:
+            msg_key = {"id": media_key}
+
+        payload = {"message": {"key": msg_key}}
+
+        logger.info("[Evolution] Baixando midia: id=%s", msg_key.get('id', '?'))
+        r = requests.post(url, json=payload, headers=HEADERS, timeout=30)
+        logger.info("[Evolution] Resposta: status=%s", r.status_code)
+
+        # Evolution API retorna 200 ou 201 para sucesso
+        if r.status_code in (200, 201):
             data = r.json()
             b64 = data.get("base64", "")
             if b64:
-                return base64.b64decode(b64)
+                decoded = base64.b64decode(b64)
+                logger.info("[Evolution] Midia OK: %d bytes", len(decoded))
+                return decoded
+            else:
+                logger.warning("[Evolution] Resposta sem base64. Chaves: %s", list(data.keys()))
+        else:
+            logger.error("[Evolution] Erro HTTP %s: %s", r.status_code, r.text[:300])
     except Exception as e:
         safe_msg = str(e).encode('utf-8', 'ignore').decode('utf-8')
-        print(f"[Evolution] Erro ao baixar m\u00eddia: {safe_msg}")
+        logger.error("[Evolution] Erro ao baixar midia: %s", safe_msg)
     return None
 
 
@@ -142,18 +162,23 @@ def extrair_webhook(payload: dict) -> dict | None:
                     "texto": msg["extendedTextMessage"]["text"].strip(),
                     "midia_id": None}
 
+        # Dados completos para download de mídia (key + message)
+        _msg_completa = {"key": key, "message": msg}
+
         # Áudio / PTT
         if "audioMessage" in msg or "pttMessage" in msg:
             midia_id = key.get("id", "")
             return {"telefone": telefone, "tipo": "audio",
-                    "texto": None, "midia_id": midia_id}
+                    "texto": None, "midia_id": midia_id,
+                    "mensagem_completa": _msg_completa}
 
         # Imagem
         if "imageMessage" in msg:
             midia_id = key.get("id", "")
             caption  = msg["imageMessage"].get("caption", "")
             return {"telefone": telefone, "tipo": "imagem",
-                    "texto": caption, "midia_id": midia_id}
+                    "texto": caption, "midia_id": midia_id,
+                    "mensagem_completa": _msg_completa}
 
         # Documento (PDF, XLSX)
         if "documentMessage" in msg:
@@ -161,10 +186,11 @@ def extrair_webhook(payload: dict) -> dict | None:
             mime      = msg["documentMessage"].get("mimetype", "")
             caption   = msg["documentMessage"].get("caption", "")
             return {"telefone": telefone, "tipo": "documento",
-                    "texto": caption, "midia_id": midia_id, "mime": mime}
+                    "texto": caption, "midia_id": midia_id, "mime": mime,
+                    "mensagem_completa": _msg_completa}
 
         return None
     except Exception as e:
         safe_msg = str(e).encode('utf-8', 'ignore').decode('utf-8')
-        print(f"[Evolution] Erro ao extrair webhook: {safe_msg}")
+        logger.error("[Evolution] Erro ao extrair webhook: %s", safe_msg)
         return None
