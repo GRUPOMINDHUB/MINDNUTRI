@@ -51,7 +51,10 @@ def _quer_comecar_do_zero(texto: str) -> bool:
 
 
 def _iniciar_boas_vindas(telefone: str) -> None:
-    banco.set_estado(telefone, "aguardando_nicho_demo", {})
+    # Preserva cupom se já foi aplicado
+    estado_atual = banco.get_estado(telefone)
+    cupom = _dados_cupom(estado_atual)
+    banco.set_estado(telefone, "aguardando_nicho_demo", cupom)
     whatsapp.enviar_texto(telefone, _msg("boas_vindas_inicial"))
 
 
@@ -274,8 +277,33 @@ def _fluxo_assinante_ativo(telefone: str, texto: str, texto_lower: str,
 
 # ── FLUXO PRÉ-ASSINATURA ─────────────────────────────────────────────────────
 
+def _validar_cpf(cpf: str) -> bool:
+    """Valida CPF usando algoritmo oficial dos dígitos verificadores."""
+    cpf = re.sub(r"\D", "", cpf)
+    if len(cpf) != 11 or cpf == cpf[0] * 11:
+        return False
+    for i in range(9, 11):
+        soma = sum(int(cpf[j]) * ((i + 1) - j) for j in range(i))
+        digito = (soma * 10 % 11) % 10
+        if int(cpf[i]) != digito:
+            return False
+    return True
+
+
+def _dados_cupom(estado: dict) -> dict:
+    """Extrai dados de cupom do estado atual, para preservar entre transições."""
+    dados = estado.get("dados", {})
+    cupom = {}
+    if dados.get("cupom_codigo"):
+        cupom["cupom_codigo"] = dados["cupom_codigo"]
+    if dados.get("cupom_valor"):
+        cupom["cupom_valor"] = dados["cupom_valor"]
+    return cupom
+
+
 def _verificar_cupom(telefone: str, texto: str, estado: dict) -> bool:
-    """Verifica se o texto contém um cupom válido. Se sim, salva no estado e avisa o user."""
+    """Verifica se o texto contém um cupom válido. Se sim, salva no estado e avisa o user.
+    Se já estiver aguardando pagamento, regenera o link com o valor do cupom."""
     from painel.models import Cupom
     texto_limpo = texto.strip().upper()
     cupom = Cupom.validar(texto_limpo)
@@ -289,6 +317,13 @@ def _verificar_cupom(telefone: str, texto: str, estado: dict) -> bool:
             valor=f"{cupom.valor_primeiro_pagamento:.2f}",
             valor_normal=f"{config.PLANO_VALOR:.2f}"))
         logger.info(f"[Cupom] {cupom.codigo} aplicado para {telefone} — R$ {cupom.valor_primeiro_pagamento}")
+
+        # Se já está aguardando pagamento, regenera o link com o desconto
+        if estado["estado"] == "aguardando_pagamento":
+            metodo = dados.get("metodo_pagamento", "cartao")
+            logger.info(f"[Cupom] Regenerando link de pagamento com desconto para {telefone}")
+            _iniciar_assinatura(telefone, metodo, dados)
+
         return True
     return False
 
@@ -300,8 +335,11 @@ def _fluxo_pre_assinatura(telefone: str, texto: str, texto_lower: str, estado: d
     """
     est = estado["estado"]
 
-    # Detectar cupom em qualquer estado do onboarding (exceto inicio)
-    if est not in ("inicio", "") and _verificar_cupom(telefone, texto, estado):
+    # Detectar cupom em qualquer estado do onboarding
+    if _verificar_cupom(telefone, texto, estado):
+        # Se é o primeiro contato, ainda inicia boas-vindas após salvar cupom
+        if est in ("inicio", ""):
+            _iniciar_boas_vindas(telefone)
         return
 
     # Primeiro contato ou estado inicial
@@ -312,14 +350,16 @@ def _fluxo_pre_assinatura(telefone: str, texto: str, texto_lower: str, estado: d
     # Aguardando escolha de nicho para o exemplo
     if est == "aguardando_nicho_demo":
         _enviar_exemplo_por_nicho(telefone, texto)
-        banco.set_estado(telefone, "aguardando_interesse", {})
+        cupom = _dados_cupom(estado)
+        banco.set_estado(telefone, "aguardando_interesse", cupom)
         whatsapp.enviar_texto(telefone, _msg("interesse_pos_demo"))
         return
 
     # Aguardando resposta de interesse após demo
     if est == "aguardando_interesse":
+        cupom = _dados_cupom(estado)
         if any(w in texto_lower for w in ("sim", "quero", "gostei", "interessei", "claro", "bora", "vamos", "show", "top", "saber", "mais", "conta")):
-            banco.set_estado(telefone, "aguardando_decisao_assinar", {})
+            banco.set_estado(telefone, "aguardando_decisao_assinar", cupom)
             whatsapp.enviar_texto(telefone, _msg("oferta_pos_demo", valor=f"{config.PLANO_VALOR:.2f}"))
         else:
             whatsapp.enviar_texto(telefone, _msg("nao_tem_interesse"))
@@ -328,8 +368,9 @@ def _fluxo_pre_assinatura(telefone: str, texto: str, texto_lower: str, estado: d
 
     # Aguardando decisão de assinar
     if est == "aguardando_decisao_assinar":
+        cupom = _dados_cupom(estado)
         if any(w in texto_lower for w in ("assinar", "sim", "quero", "pagar", "contratar")):
-            banco.set_estado(telefone, "coletando_dados", {})
+            banco.set_estado(telefone, "coletando_dados", cupom)
             _conversar_coleta_dados(telefone, texto, estado)
         else:
             whatsapp.enviar_texto(telefone, _msg("nao_quer_assinar"))
@@ -345,7 +386,7 @@ def _fluxo_pre_assinatura(telefone: str, texto: str, texto_lower: str, estado: d
         metodo = _interpretar_metodo_pagamento(texto)
         if not metodo:
             _pedir_metodo_pagamento(telefone, "escolha_pagamento_assinatura",
-                "Não entendi o método. Pode repetir?")
+                "Não entendi o método. Pode repetir?", dados=estado.get("dados", {}))
             return
         _iniciar_assinatura(telefone, metodo, estado.get("dados", {}))
         return
@@ -359,7 +400,7 @@ def _fluxo_pre_assinatura(telefone: str, texto: str, texto_lower: str, estado: d
             return
         if any(c in texto_lower for c in ("mudar", "trocar", "alterar", "outro")):
             _pedir_metodo_pagamento(telefone, "escolha_pagamento_assinatura",
-                "Qual método você prefere agora?")
+                "Qual método você prefere agora?", dados=estado.get("dados", {}))
             return
         # Reenviar link se pedido
         if any(c in texto_lower for c in ("link", "manda", "enviar", "reenviar", "pagar", "cade", "cadê")):
@@ -433,13 +474,23 @@ def _conversar_coleta_dados(telefone: str, texto: str, estado: dict) -> None:
                     whatsapp.enviar_texto(telefone, _msg("dados_coleta_quase_la"))
                     return
 
+                if not _validar_cpf(cpf):
+                    whatsapp.enviar_texto(telefone,
+                        "⚠️ O CPF informado não é válido. Pode verificar e me enviar novamente?")
+                    return
+
                 if instagram.lower() in ("nao", "não", "n", "nenhum", "nao tenho", "não tenho"):
                     instagram = "NAO"
                 elif not instagram.startswith("@"):
                     instagram = "@" + instagram.lstrip("@")
 
                 # Salva dados no estado para usar em _iniciar_assinatura
-                dados_cadastro = {"nome": nome, "cpf": cpf, "instagram": instagram}
+                # Preserva cupom se já foi aplicado durante a coleta
+                # Recarrega estado fresh do banco para pegar cupom salvo em mensagem anterior
+                estado_atual = banco.get_estado(telefone)
+                dados_cadastro = estado_atual.get("dados", {})
+                dados_cadastro.update({"nome": nome, "cpf": cpf, "instagram": instagram})
+                logger.info(f"[Coleta] Dados finais: {dados_cadastro}")
                 banco.set_estado(telefone, "escolha_pagamento_assinatura", dados_cadastro)
                 banco.salvar_mensagem(telefone, "system", "[Dados coletados]")
 
@@ -515,8 +566,8 @@ def _normalizar_texto_pagamento(texto: str) -> str:
     return sem_acentos.lower().strip()
 
 
-def _pedir_metodo_pagamento(telefone: str, estado_destino: str, abertura: str) -> None:
-    banco.set_estado(telefone, estado_destino, {})
+def _pedir_metodo_pagamento(telefone: str, estado_destino: str, abertura: str, dados: dict = None) -> None:
+    banco.set_estado(telefone, estado_destino, dados or {})
     whatsapp.enviar_texto(telefone, _msg("pedir_metodo_pagamento", abertura=abertura))
 
 
@@ -553,6 +604,11 @@ def _iniciar_assinatura(telefone: str, metodo: str, dados_cadastro: dict = None)
     if cupom_codigo:
         logger.info(f"[Cupom] Usando cupom {cupom_codigo} — primeiro pagamento R$ {valor_primeiro:.2f}")
 
+    # Asaas exige mínimo R$ 5 para qualquer cobrança
+    if valor_primeiro < 5.0:
+        logger.warning(f"[Pagamento] Valor R$ {valor_primeiro:.2f} abaixo do mínimo Asaas (R$ 5). Ajustando para R$ 5,00.")
+        valor_primeiro = 5.0
+
     try:
         if metodo == "cartao":
             from utils.asaas import criar_link_assinatura_cartao
@@ -587,6 +643,7 @@ def _iniciar_assinatura(telefone: str, metodo: str, dados_cadastro: dict = None)
             if cupom_obj:
                 cupom_obj.usar()
             dados_estado["cupom_codigo"] = cupom_codigo
+            dados_estado["cupom_valor"] = cupom_valor
 
         banco.set_estado(telefone, "aguardando_pagamento", dados_estado)
 
