@@ -134,23 +134,21 @@ MENSAGENS_PADRAO = [
     {
         "chave": "prompt_coleta",
         "categoria": "coleta",
-        "descricao": "System prompt do LLM para coleta de Nome, CPF e Instagram (NÃO é mensagem do WhatsApp)",
+        "descricao": "System prompt do LLM para coleta de Nome e Instagram (NÃO é mensagem do WhatsApp)",
         "texto": (
             "Você é o assistente de cadastro do Mindnutri. "
-            "Seu objetivo é coletar exatamente 3 dados do usuário, UM DE CADA VEZ, nesta ordem:\n"
+            "Seu objetivo é coletar exatamente 2 dados do usuário, UM DE CADA VEZ, nesta ordem:\n"
             "1. Nome completo\n"
-            "2. CPF\n"
-            "3. @ do Instagram\n\n"
+            "2. @ do Instagram\n\n"
             "REGRAS IMPORTANTES:\n"
-            "- Peça APENAS UM dado por mensagem. Nunca peça dois ou três de uma vez.\n"
-            "- Comece pedindo o nome. Quando receber o nome, agradeça e peça o CPF. "
-            "Quando receber o CPF, agradeça e peça o Instagram.\n"
+            "- Peça APENAS UM dado por mensagem. Nunca peça dois de uma vez.\n"
+            "- Comece pedindo o nome. Quando receber o nome, agradeça e peça o Instagram.\n"
             "- Se o usuário já informou algum dado espontaneamente, absorva-o e peça apenas o próximo da lista.\n"
             "- Se o usuário não tiver Instagram, aceite 'NAO' como valor.\n"
-            "- Quando tiver os 3 dados confirmados, chame OBRIGATORIAMENTE a função 'concluir_coleta_dados'.\n"
+            "- Quando tiver os 2 dados confirmados, chame OBRIGATORIAMENTE a função 'concluir_coleta_dados'.\n"
             "- Seja educado, direto e acolhedor. Use mensagens curtas.\n"
             "- PROIBIDO ABSOLUTO: jamais pergunte dados de cartão de crédito, número de cartão, "
-            "senha, CVV, data de validade, dados bancários ou qualquer informação financeira.\n"
+            "senha, CVV, data de validade, dados bancários, CPF ou qualquer informação financeira.\n"
             "- Se o usuário mencionar pagamento, cartão, PIX ou link, responda apenas: "
             "'Primeiro vamos finalizar seu cadastro! Me diz [dado que falta]?'"
         ),
@@ -160,7 +158,7 @@ MENSAGENS_PADRAO = [
     {
         "chave": "dados_coletados_pagamento",
         "categoria": "coleta",
-        "descricao": "Mensagem após coletar nome, CPF e Instagram — apresenta opções de pagamento",
+        "descricao": "Mensagem após coletar nome e Instagram — apresenta opções de pagamento",
         "texto": (
             "Perfeito, {nome}! 🎉\n\n"
             "Agora vamos para o pagamento.\n\n"
@@ -176,7 +174,7 @@ MENSAGENS_PADRAO = [
         "chave": "dados_coleta_erro",
         "categoria": "coleta",
         "descricao": "Quando o LLM não conseguiu confirmar os dados do cadastro",
-        "texto": "Não consegui confirmar os dados. Pode reenviar nome, CPF e Instagram?",
+        "texto": "Não consegui confirmar os dados. Pode reenviar seu nome e @ do Instagram?",
         "variaveis": "",
         "ordem": 30,
     },
@@ -184,7 +182,7 @@ MENSAGENS_PADRAO = [
         "chave": "dados_coleta_quase_la",
         "categoria": "coleta",
         "descricao": "Quando faltam dados no cadastro",
-        "texto": "Quase lá! Me envie o que faltou: nome completo, CPF e @ do Instagram.",
+        "texto": "Quase lá! Me envie o que faltou: nome completo e @ do Instagram.",
         "variaveis": "",
         "ordem": 40,
     },
@@ -192,7 +190,7 @@ MENSAGENS_PADRAO = [
         "chave": "dados_coleta_vazio",
         "categoria": "coleta",
         "descricao": "Quando o LLM não retorna conteúdo na coleta",
-        "texto": "Estou aqui para finalizar seu cadastro. Me envie seu nome, CPF e @ do Instagram.",
+        "texto": "Estou aqui para finalizar seu cadastro. Me envie seu nome e @ do Instagram.",
         "variaveis": "",
         "ordem": 50,
     },
@@ -200,7 +198,7 @@ MENSAGENS_PADRAO = [
         "chave": "dados_coleta_instabilidade",
         "categoria": "coleta",
         "descricao": "Erro de processamento durante a coleta de dados",
-        "texto": "Tive uma instabilidade rápida. Pode me enviar seu nome, CPF e Instagram novamente?",
+        "texto": "Tive uma instabilidade rápida. Pode me enviar seu nome e Instagram novamente?",
         "variaveis": "",
         "ordem": 60,
     },

@@ -1,6 +1,6 @@
 """
 Testes unitários das funções core do Mindnutri.
-Cobre: validação CPF, normalização de ingredientes, processamento de mídia,
+Cobre: normalização de ingredientes, processamento de mídia,
        fluxo de decisão, helpers e idempotência de webhook.
 
 Executar: python manage.py test agente_app
@@ -10,7 +10,6 @@ from django.test import TestCase, RequestFactory
 from django.conf import settings
 
 from agente_app.nucleo import (
-    _validar_cpf,
     _quer_comecar_do_zero,
     _eh_resposta_sim,
     _eh_resposta_nao,
@@ -22,25 +21,6 @@ from agente_app.nucleo import (
     _interpretar_metodo_pagamento,
 )
 from agente_app.gerador.xlsx_gerador import _normalizar_ingrediente, _safe_float
-
-
-# ── CPF ──────────────────────────────────────────────────────────
-
-class ValidarCPFTest(TestCase):
-    def test_cpf_valido(self):
-        self.assertTrue(_validar_cpf("529.982.247-25"))
-        self.assertTrue(_validar_cpf("52998224725"))
-
-    def test_cpf_invalido(self):
-        self.assertFalse(_validar_cpf("000.000.000-00"))
-        self.assertFalse(_validar_cpf("111.111.111-11"))
-        self.assertFalse(_validar_cpf("123.456.789-00"))
-        self.assertFalse(_validar_cpf("123"))
-        self.assertFalse(_validar_cpf(""))
-
-    def test_cpf_com_formatacao(self):
-        self.assertTrue(_validar_cpf("529.982.247-25"))
-        self.assertFalse(_validar_cpf("529.982.247-26"))
 
 
 # ── HELPERS DE DETECÇÃO ──────────────────────────────────────────

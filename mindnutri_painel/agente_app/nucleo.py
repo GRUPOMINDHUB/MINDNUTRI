@@ -282,18 +282,6 @@ def _fluxo_assinante_ativo(telefone: str, texto: str, texto_lower: str,
 
 # ── FLUXO PRÉ-ASSINATURA ─────────────────────────────────────────────────────
 
-def _validar_cpf(cpf: str) -> bool:
-    """Valida CPF usando algoritmo oficial dos dígitos verificadores."""
-    cpf = re.sub(r"\D", "", cpf)
-    if len(cpf) != 11 or cpf == cpf[0] * 11:
-        return False
-    for i in range(9, 11):
-        soma = sum(int(cpf[j]) * ((i + 1) - j) for j in range(i))
-        digito = (soma * 10 % 11) % 10
-        if int(cpf[i]) != digito:
-            return False
-    return True
-
 
 def _dados_cupom(estado: dict) -> dict:
     """Extrai dados de cupom do estado atual, para preservar entre transições."""
@@ -381,7 +369,7 @@ def _fluxo_pre_assinatura(telefone: str, texto: str, texto_lower: str, estado: d
             whatsapp.enviar_texto(telefone, _msg("nao_quer_assinar"))
         return
 
-    # Coletando dados via LLM (Nome, CPF, Instagram)
+    # Coletando dados via LLM (Nome e Instagram)
     if est == "coletando_dados":
         _conversar_coleta_dados(telefone, texto, estado)
         return
@@ -421,7 +409,7 @@ def _fluxo_pre_assinatura(telefone: str, texto: str, texto_lower: str, estado: d
 
 def _conversar_coleta_dados(telefone: str, texto: str, estado: dict) -> None:
     """
-    Usa LLM para coletar Nome, CPF e Instagram de forma conversacional.
+    Usa LLM para coletar Nome e Instagram de forma conversacional.
     Quando todos os dados estiverem confirmados, avança para pagamento.
     """
     prompt_coleta = _msg("prompt_coleta")
@@ -435,15 +423,14 @@ def _conversar_coleta_dados(telefone: str, texto: str, estado: dict) -> None:
         "type": "function",
         "function": {
             "name": "concluir_coleta_dados",
-            "description": "Conclui o cadastro após coletar nome, cpf e instagram.",
+            "description": "Conclui o cadastro após coletar nome e instagram.",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "nome":      {"type": "string"},
-                    "cpf":       {"type": "string"},
                     "instagram": {"type": "string"},
                 },
-                "required": ["nome", "cpf", "instagram"],
+                "required": ["nome", "instagram"],
             },
         },
     }]
@@ -473,16 +460,10 @@ def _conversar_coleta_dados(telefone: str, texto: str, estado: dict) -> None:
                     return
 
                 nome      = (args.get("nome") or "").strip()
-                cpf       = re.sub(r"\D", "", args.get("cpf") or "")
                 instagram = (args.get("instagram") or "").strip()
 
-                if not (nome and cpf and instagram):
+                if not (nome and instagram):
                     whatsapp.enviar_texto(telefone, _msg("dados_coleta_quase_la"))
-                    return
-
-                if not _validar_cpf(cpf):
-                    whatsapp.enviar_texto(telefone,
-                        "⚠️ O CPF informado não é válido. Pode verificar e me enviar novamente?")
                     return
 
                 if instagram.lower() in ("nao", "não", "n", "nenhum", "nao tenho", "não tenho"):
@@ -495,7 +476,7 @@ def _conversar_coleta_dados(telefone: str, texto: str, estado: dict) -> None:
                 # Recarrega estado fresh do banco para pegar cupom salvo em mensagem anterior
                 estado_atual = banco.get_estado(telefone)
                 dados_cadastro = estado_atual.get("dados", {})
-                dados_cadastro.update({"nome": nome, "cpf": cpf, "instagram": instagram})
+                dados_cadastro.update({"nome": nome, "instagram": instagram})
                 logger.info("[Coleta] Dados finais: %s", dados_cadastro)
                 banco.set_estado(telefone, "escolha_pagamento_assinatura", dados_cadastro)
                 banco.salvar_mensagem(telefone, "system", "[Dados coletados]")
@@ -589,7 +570,6 @@ def _iniciar_assinatura(telefone: str, metodo: str, dados_cadastro: dict = None)
             telefone=telefone,
             defaults={
                 "nome":      dados.get("nome", ""),
-                "cpf":       dados.get("cpf", ""),
                 "instagram": dados.get("instagram", ""),
                 "status":    "pendente",
             }
@@ -598,7 +578,6 @@ def _iniciar_assinatura(telefone: str, metodo: str, dados_cadastro: dict = None)
         if dados:
             banco.atualizar_assinante(telefone,
                 nome=dados.get("nome", ""),
-                cpf=dados.get("cpf", ""),
                 instagram=dados.get("instagram", ""),
             )
 
