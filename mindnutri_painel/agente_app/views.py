@@ -47,7 +47,6 @@ def webhook_whatsapp(request):
     msg = extrair_webhook(payload)
 
     if not msg:
-        logger.debug("[Webhook] Mensagem ignorada (não é mensagens.upsert ou é do bot)")
         return JsonResponse({"ok": True, "ignorado": True})
 
     telefone = msg["telefone"]
