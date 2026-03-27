@@ -3,10 +3,15 @@ Serviço de assinaturas Mindnutri.
 Centraliza toda lógica de ciclo de vida:
   criar → pagar → ativar → usar → renovar → bloquear → reativar → cancelar
 """
+import logging
 from datetime import date, timedelta
+
+from django.conf import settings as config
+
 from assinaturas.asaas_client import asaas
 from utils import banco, whatsapp
-from django.conf import settings as config
+
+logger = logging.getLogger(__name__)
 
 
 # ── CRIAÇÃO ───────────────────────────────────────────────────────
@@ -121,7 +126,7 @@ def bloquear_por_inadimplencia(telefone: str, payment_data: dict):
             )
             link = cobranca.get("invoiceUrl") or cobranca.get("bankSlipUrl", "")
     except Exception as e:
-        print(f"[Asaas] Erro ao gerar cobrança de regularização: {e}")
+        logger.error("[Asaas] Erro ao gerar cobranca de regularizacao: %s", e)
 
     msg = (
         "⚠️ Seu acesso ao Mindnutri foi *suspenso* por falta de pagamento.\n\n"
@@ -353,7 +358,7 @@ def verificar_vencimentos():
                 "Qualquer dúvida, estamos aqui! 😊"
             )
     except Exception as e:
-        print(f"[Assinaturas] Erro ao verificar vencimentos: {e}")
+        logger.error("[Assinaturas] Erro ao verificar vencimentos: %s", e)
 
 
 # ── HELPERS ───────────────────────────────────────────────────────

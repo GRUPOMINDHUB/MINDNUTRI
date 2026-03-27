@@ -226,7 +226,7 @@ def gerar_ficha_xlsx(dados: dict, caminho_saida: str) -> str:
         ws[f"F{row}"] = ing.get("ic", 1.0)
         ws[f"G{row}"] = f"=D{row}*F{row}"
         ws[f"H{row}"] = ing.get("custo_unit", 0)
-        ws[f"I{row}"] = f"=H{row}*D{row}"
+        ws[f"I{row}"] = f"=H{row}*C{row}"
 
         fmt = {"A": (None,"left"),"B":(None,"center"),
                "C":("#,##0.000","center"),"D":("#,##0.000","center"),

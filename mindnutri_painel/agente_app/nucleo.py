@@ -1,38 +1,27 @@
 import json
-import re
+import logging
 import os
+import re
 import tempfile
 import unicodedata
 from datetime import datetime
 from pathlib import Path
-import logging
 
-# ConfiguraÃ§Ã£o de log em arquivo
-logging.basicConfig(
-    filename='agente_debug.log',
-    level=logging.INFO,
-    format='%(asctime)s [%(levelname)s] %(message)s'
-)
 logger = logging.getLogger(__name__)
 
 import openai
 import requests
-
 from django.conf import settings as config
+
 from agente_app.prompt import SYSTEM_PROMPT
+from agente_app.gerador import xlsx_gerador, pdf_gerador
 from painel.mensagens_cache import msg as _msg
 from utils import banco, whatsapp, midia, storage
-from agente_app.gerador import xlsx_gerador, pdf_gerador
 
 _gpt = openai.OpenAI(api_key=config.OPENAI_API_KEY)
 
-# Pasta de assets (logo, exemplos) â€” relativa Ã  raiz do projeto Django (mindnutri_painel/)
-ASSETS_DIR   = Path(__file__).parent.parent / "assets"
-EXEMPLOS_DIR = Path(__file__).parent.parent / "exemplos"
+EXEMPLOS_DIR: Path = Path(__file__).parent.parent / "exemplos"
 
-# Contador de falhas de entendimento por telefone.
-# Note: not thread-safe; acceptable for single-process --noreload deployments.
-# For multi-process/threaded setups, move to a persistent store (e.g. banco).
 _falhas: dict[str, int] = {}
 
 
@@ -58,59 +47,77 @@ def _iniciar_boas_vindas(telefone: str) -> None:
     whatsapp.enviar_texto(telefone, _msg("boas_vindas_inicial"))
 
 
-def processar_mensagem(telefone: str, tipo: str, texto: str = None,
-                       midia_id: str = None, midia_bytes: bytes = None) -> None:
-    """Ponto de entrada único para todas as mensagens recebidas."""
-    logger.info(f"[Recebido] telefone={telefone} tipo={tipo} texto={texto}")
+def _processar_midia(telefone: str, tipo: str, texto: str | None,
+                     midia_bytes: bytes | None, estado_atual: str) -> tuple[str | None, str]:
+    """
+    Converte mídia (áudio, imagem, documento) em texto processável.
+    Retorna (texto_convertido, tipo_convertido). texto_convertido=None indica erro já tratado.
+    """
+    _ESTADOS_FOTO = ("coletando_foto_preparo", "aguardando_foto_operacional")
 
-    estado = banco.get_estado(telefone)
-
-    # ── Processar mídia ──────────────────────────────────────────────
-    estado_atual_midia = estado.get("estado", "")
-    logger.debug(f"[Midia] estado={estado_atual_midia} tipo={tipo} tem_midia_bytes={midia_bytes is not None}")
-    if estado_atual_midia in ("coletando_foto_preparo", "aguardando_foto_operacional") and tipo == "imagem" and midia_bytes:
-        logger.debug(f"[Midia] Salvando foto do prato ({len(midia_bytes)} bytes)")
-        foto_path = _salvar_foto_prato_operacional(telefone, midia_bytes)
-        if foto_path:
-            texto = f"[FOTO_PRATO]{foto_path}"
-            tipo = "texto"
-            logger.debug(f"[Midia] Foto salva com sucesso: {foto_path}")
-        else:
+    if estado_atual in _ESTADOS_FOTO and tipo == "imagem":
+        if not midia_bytes:
+            logger.error("[Midia] Imagem recebida mas midia_bytes vazio!")
             whatsapp.enviar_texto(telefone, _msg("foto_nao_salva"))
-            return
-    elif estado_atual_midia in ("coletando_foto_preparo", "aguardando_foto_operacional") and tipo == "imagem" and not midia_bytes:
-        logger.error("[Midia] Imagem recebida mas midia_bytes está vazio!")
-        whatsapp.enviar_texto(telefone, _msg("foto_nao_salva"))
-        return
-    elif tipo == "audio" and midia_bytes:
+            return None, tipo
+        foto_path = _salvar_foto_prato_operacional(telefone, midia_bytes)
+        if not foto_path:
+            whatsapp.enviar_texto(telefone, _msg("foto_nao_salva"))
+            return None, tipo
+        return f"[FOTO_PRATO]{foto_path}", "texto"
+
+    if tipo == "audio" and midia_bytes:
         try:
             texto_transcrito = midia.transcrever_audio(midia_bytes)
         except Exception as e:
-            logger.error(f"[Midia] Falha ao transcrever audio de {telefone}: {e}")
+            logger.error("[Midia] Falha ao transcrever audio de %s: %s", telefone, e)
             whatsapp.enviar_texto(telefone, _msg("audio_nao_transcrito"))
-            return
+            return None, tipo
         if not texto_transcrito:
             whatsapp.enviar_texto(telefone, _msg("audio_nao_transcrito"))
-            return
-        texto = texto_transcrito
-    elif tipo == "imagem" and midia_bytes:
+            return None, tipo
+        return texto_transcrito, tipo
+
+    if tipo == "imagem" and midia_bytes:
         try:
-            ingredientes_extraidos = midia.extrair_ingredientes_de_imagem(midia_bytes)
+            ingredientes = midia.extrair_ingredientes_de_imagem(midia_bytes)
         except Exception as e:
-            logger.error(f"[Midia] Falha ao extrair ingredientes de imagem de {telefone}: {e}")
-            whatsapp.enviar_texto(telefone,
+            logger.error("[Midia] Falha ao extrair ingredientes de imagem de %s: %s", telefone, e)
+            whatsapp.enviar_texto(
+                telefone,
                 "Recebi sua imagem, mas não consegui processá-la. "
-                "Pode tentar enviar novamente ou descrever por texto?")
+                "Pode tentar enviar novamente ou descrever por texto?"
+            )
+            return None, tipo
+        return f"[IMAGEM ENVIADA]\nIngredientes identificados na imagem:\n{ingredientes}", tipo
+
+    if tipo == "imagem" and not midia_bytes:
+        logger.error("[Midia] Imagem recebida sem bytes para %s", telefone)
+        whatsapp.enviar_texto(telefone, _msg("erro_processar_imagem"))
+        return None, tipo
+
+    if tipo == "documento" and midia_bytes:
+        return "[DOCUMENTO ENVIADO] O cliente enviou um documento para análise.", tipo
+
+    return texto, tipo
+
+
+def processar_mensagem(telefone: str, tipo: str, texto: str | None = None,
+                       midia_id: str | None = None, midia_bytes: bytes | None = None) -> None:
+    """Ponto de entrada único para todas as mensagens recebidas."""
+    logger.info("[Recebido] telefone=%s tipo=%s texto=%s", telefone, tipo, texto)
+
+    # Feedback imediato: indica que o bot está processando
+    whatsapp.enviar_presenca(telefone, "composing")
+
+    estado = banco.get_estado(telefone)
+    estado_atual = estado.get("estado", "")
+
+    # ── Processar mídia ──────────────────────────────────────────────
+    if tipo != "texto" or (tipo == "imagem" and estado_atual in ("coletando_foto_preparo", "aguardando_foto_operacional")):
+        texto, tipo = _processar_midia(telefone, tipo, texto, midia_bytes, estado_atual)
+        if texto is None:
             return
-        texto = f"[IMAGEM ENVIADA]\nIngredientes identificados na imagem:\n{ingredientes_extraidos}"
-    elif tipo == "imagem" and not midia_bytes:
-        logger.error("[Midia] Imagem recebida fora do fluxo de foto, midia_bytes vazio!")
-        whatsapp.enviar_texto(telefone,
-            "Recebi sua imagem, mas não consegui processá-la. "
-            "Pode tentar enviar novamente ou descrever por texto?")
-        return
-    elif tipo == "documento" and midia_bytes:
-        texto = "[DOCUMENTO ENVIADO] O cliente enviou um documento para análise."
 
     if not texto:
         whatsapp.enviar_texto(telefone, _msg("mensagem_nao_entendida"))
@@ -118,8 +125,6 @@ def processar_mensagem(telefone: str, tipo: str, texto: str = None,
 
     texto_lower = texto.lower().strip()
     est = estado["estado"]
-
-    logger.debug(f"telefone={telefone} estado={est}")
 
     # ── Confirmação de reset em andamento ────────────────────────────
     if est == "confirmando_reset":
@@ -316,12 +321,12 @@ def _verificar_cupom(telefone: str, texto: str, estado: dict) -> bool:
             codigo=cupom.codigo,
             valor=f"{cupom.valor_primeiro_pagamento:.2f}",
             valor_normal=f"{config.PLANO_VALOR:.2f}"))
-        logger.info(f"[Cupom] {cupom.codigo} aplicado para {telefone} — R$ {cupom.valor_primeiro_pagamento}")
+        logger.info("[Cupom] %s aplicado para %s — R$ %s", cupom.codigo, telefone, cupom.valor_primeiro_pagamento)
 
         # Se já está aguardando pagamento, regenera o link com o desconto
         if estado["estado"] == "aguardando_pagamento":
             metodo = dados.get("metodo_pagamento", "cartao")
-            logger.info(f"[Cupom] Regenerando link de pagamento com desconto para {telefone}")
+            logger.info("[Cupom] Regenerando link de pagamento com desconto para %s", telefone)
             _iniciar_assinatura(telefone, metodo, dados)
 
         return True
@@ -449,6 +454,7 @@ def _conversar_coleta_dados(telefone: str, texto: str, estado: dict) -> None:
             model=modelo,
             messages=mensagens,
             tools=tools,
+            timeout=60,
         )
         message = resposta.choices[0].message
 
@@ -490,7 +496,7 @@ def _conversar_coleta_dados(telefone: str, texto: str, estado: dict) -> None:
                 estado_atual = banco.get_estado(telefone)
                 dados_cadastro = estado_atual.get("dados", {})
                 dados_cadastro.update({"nome": nome, "cpf": cpf, "instagram": instagram})
-                logger.info(f"[Coleta] Dados finais: {dados_cadastro}")
+                logger.info("[Coleta] Dados finais: %s", dados_cadastro)
                 banco.set_estado(telefone, "escolha_pagamento_assinatura", dados_cadastro)
                 banco.salvar_mensagem(telefone, "system", "[Dados coletados]")
 
@@ -501,7 +507,7 @@ def _conversar_coleta_dados(telefone: str, texto: str, estado: dict) -> None:
             whatsapp.enviar_texto(telefone, _msg("dados_coleta_vazio"))
 
     except Exception as e:
-        logger.error(f"[Coleta dados] Erro: {e}")
+        logger.error("[Coleta dados] Erro: %s", e)
         whatsapp.enviar_texto(telefone, _msg("dados_coleta_instabilidade"))
 def _enviar_exemplo_por_nicho(telefone: str, texto: str) -> None:
     """Envia os arquivos de exemplo para o nicho escolhido."""
@@ -530,14 +536,14 @@ def _enviar_exemplo_por_nicho(telefone: str, texto: str) -> None:
             caption=f"Ficha Técnica — {nicho_label} (XLSX)")
         enviou_algo = True
     else:
-        logger.error(f"Arquivo de exemplo não encontrado: {xlsx_path}")
+        logger.error("Arquivo de exemplo não encontrado: %s", xlsx_path)
 
     if pdf_path.exists():
         whatsapp.enviar_arquivo(telefone, str(pdf_path),
             caption=f"Ficha Operacional — {nicho_label} (PDF)")
         enviou_algo = True
     else:
-        logger.error(f"Arquivo de exemplo não encontrado: {pdf_path}")
+        logger.error("Arquivo de exemplo não encontrado: %s", pdf_path)
 
     if not enviou_algo:
         whatsapp.enviar_texto(telefone, _msg("exemplo_nicho_erro"))
@@ -573,7 +579,7 @@ def _pedir_metodo_pagamento(telefone: str, estado_destino: str, abertura: str, d
 
 def _iniciar_assinatura(telefone: str, metodo: str, dados_cadastro: dict = None) -> None:
     """Cria o Assinante no banco (se ainda não existir), gera o link e envia ao cliente."""
-    logger.info(f"[Asaas] Iniciando assinatura para {telefone} via {metodo}")
+    logger.info("[Asaas] Iniciando assinatura para %s via %s", telefone, metodo)
 
     # Cria o Assinante APENAS agora (na emissão do link de pagamento)
     dados = dados_cadastro or {}
@@ -602,11 +608,11 @@ def _iniciar_assinatura(telefone: str, metodo: str, dados_cadastro: dict = None)
     valor_primeiro = float(cupom_valor) if cupom_valor else config.PLANO_VALOR
 
     if cupom_codigo:
-        logger.info(f"[Cupom] Usando cupom {cupom_codigo} — primeiro pagamento R$ {valor_primeiro:.2f}")
+        logger.info("[Cupom] Usando cupom %s — primeiro pagamento R$ %.2f", cupom_codigo, valor_primeiro)
 
     # Asaas exige mínimo R$ 5 para qualquer cobrança
     if valor_primeiro < 5.0:
-        logger.warning(f"[Pagamento] Valor R$ {valor_primeiro:.2f} abaixo do mínimo Asaas (R$ 5). Ajustando para R$ 5,00.")
+        logger.warning("[Pagamento] Valor R$ %.2f abaixo do mínimo Asaas (R$ 5). Ajustando para R$ 5,00.", valor_primeiro)
         valor_primeiro = 5.0
 
     try:
@@ -648,9 +654,9 @@ def _iniciar_assinatura(telefone: str, metodo: str, dados_cadastro: dict = None)
         banco.set_estado(telefone, "aguardando_pagamento", dados_estado)
 
     except Exception as e:
-        logger.error(f"ERRO ASAAS: {e}")
+        logger.error("ERRO ASAAS: %s", e)
         if isinstance(e, requests.exceptions.HTTPError) and hasattr(e, 'response') and e.response is not None:
-            logger.error(f"ASAAS RESPONSE: {e.response.text}")
+            logger.error("ASAAS RESPONSE: %s", e.response.text)
 
         erro_body = e.response.text if isinstance(e, requests.exceptions.HTTPError) and hasattr(e, 'response') and e.response is not None else ""
         if metodo == "pix" and "Pix" in erro_body:
@@ -699,13 +705,13 @@ def _normalizar_lista_modo_preparo(texto: str) -> list[str]:
     Aceita: linhas separadas, numeração, ponto-e-vírgula, ou texto corrido com frases.
     Cada passo lógico completo vira um item.
     """
-    bruto = (texto or "").strip()
-    if not bruto:
-        return []
-
     # Se é uma lista (da IA), já vem ok
     if isinstance(texto, list):
         return [str(p).strip() for p in texto if str(p).strip()]
+
+    bruto = (texto or "").strip()
+    if not bruto:
+        return []
 
     # Separar por quebras de linha
     linhas = [l.strip(" -•\t") for l in bruto.splitlines() if l.strip()]
@@ -740,10 +746,10 @@ def _salvar_foto_prato_operacional(telefone: str, midia_bytes: bytes) -> str | N
     try:
         nome_foto = f"foto_prato_{datetime.now().strftime('%Y%m%d_%H%M%S')}.jpg"
         caminho = storage.salvar_arquivo(telefone, nome_foto, dados=midia_bytes)
-        logger.debug(f"[Fluxo PDF] Foto salva em: {caminho}")
+        logger.debug("[Fluxo PDF] Foto salva em: %s", caminho)
         return caminho
     except Exception as e:
-        logger.error(f"[Fluxo PDF] Falha ao salvar foto do prato: {e}")
+        logger.error("[Fluxo PDF] Falha ao salvar foto do prato: %s", e)
         return None
 
 
@@ -810,7 +816,7 @@ def _iniciar_fluxo_pos_coleta_tecnica(telefone: str, dados_tecnica: dict) -> Non
     }
     banco.set_estado(telefone, "aguardando_decisao_ficha_operacional", dados_fluxo)
     whatsapp.enviar_texto(telefone, _msg("pergunta_ficha_operacional"))
-    logger.debug(f"[Fluxo] Pergunta sobre PDF enviada para {telefone}")
+    logger.debug("[Fluxo] Pergunta sobre PDF enviada para %s", telefone)
 
 
 def _finalizar_fluxo_geracao_integrada(telefone: str, fluxo: dict, assinante: dict) -> None:
@@ -829,11 +835,11 @@ def _finalizar_fluxo_geracao_integrada(telefone: str, fluxo: dict, assinante: di
             foto_path=fluxo.get("foto_path", ""),
             modo_preparo=fluxo.get("modo_preparo") or dados_tecnica.get("modo_preparo", []),
         )
-        logger.info(f"[Fluxo] Gerando combo XLSX+PDF para {telefone}")
+        logger.info("[Fluxo] Gerando combo XLSX+PDF para %s", telefone)
         _gerar_e_enviar_arquivo(telefone, dados_combo, "combo", assinante)
     else:
         # Só Excel
-        logger.info(f"[Fluxo] Gerando somente XLSX para {telefone}")
+        logger.info("[Fluxo] Gerando somente XLSX para %s", telefone)
         _gerar_e_enviar_arquivo(telefone, dados_tecnica, "tecnica", assinante)
 
     banco.resetar_estado(telefone)
@@ -846,13 +852,13 @@ def _avancar_coleta_operacional(telefone: str, fluxo: dict, assinante: dict) -> 
     if not foto_path:
         banco.set_estado(telefone, "aguardando_foto_operacional", fluxo)
         whatsapp.enviar_texto(telefone, _msg("aguardando_foto"))
-        logger.debug(f"[Fluxo PDF] Aguardando foto do prato de {telefone}")
+        logger.debug("[Fluxo PDF] Aguardando foto do prato de %s", telefone)
         return
 
     if not modo_preparo:
         banco.set_estado(telefone, "aguardando_modo_preparo_operacional", fluxo)
         whatsapp.enviar_texto(telefone, _msg("aguardando_modo_preparo"))
-        logger.debug(f"[Fluxo PDF] Aguardando modo de preparo de {telefone}")
+        logger.debug("[Fluxo PDF] Aguardando modo de preparo de %s", telefone)
         return
 
     # Garantir que modo_preparo esteja no nível correto do fluxo
@@ -867,14 +873,14 @@ def _fluxo_decisao_ficha_operacional(telefone: str, texto: str, estado: dict, as
         fluxo["gerar_operacional"] = True
         fluxo["modo_preparo"] = fluxo.get("modo_preparo") or fluxo.get("tecnica_dados", {}).get("modo_preparo", [])
         banco.set_estado(telefone, "aguardando_decisao_ficha_operacional", fluxo)
-        logger.info(f"[Fluxo PDF] Cliente {telefone} optou por gerar PDF operacional.")
+        logger.info("[Fluxo PDF] Cliente %s optou por gerar PDF operacional.", telefone)
         _avancar_coleta_operacional(telefone, fluxo, assinante)
         return
 
     if _eh_resposta_nao(texto):
         fluxo["gerar_operacional"] = False
         whatsapp.enviar_texto(telefone, _msg("somente_tecnica"))
-        logger.info(f"[Fluxo PDF] Cliente {telefone} optou por gerar somente tecnica.")
+        logger.info("[Fluxo PDF] Cliente %s optou por gerar somente tecnica.", telefone)
         _finalizar_fluxo_geracao_integrada(telefone, fluxo, assinante)
         return
 
@@ -945,7 +951,7 @@ def _fluxo_coleta_modo_preparo_operacional(telefone: str, texto: str, estado: di
 
     fluxo["modo_preparo"] = passos
     banco.set_estado(telefone, "aguardando_modo_preparo_operacional", fluxo)
-    logger.debug(f"[Fluxo PDF] Modo de preparo recebido ({len(passos)} passos) para {telefone}")
+    logger.debug("[Fluxo PDF] Modo de preparo recebido (%s passos) para %s", len(passos), telefone)
     _finalizar_fluxo_geracao_integrada(telefone, fluxo, assinante)
 
 
@@ -977,7 +983,7 @@ def _conversar_com_ia(telefone: str, texto: str, assinante: dict) -> None:
             for p in perdas_com_valor
         )
     except Exception as e:
-        logger.warning(f"[IA] Falha ao carregar base de perdas: {e}")
+        logger.warning("[IA] Falha ao carregar base de perdas: %s", e)
         perdas_texto = ""
 
     contexto_extra = f"""
@@ -1042,35 +1048,6 @@ BASE DE PERDAS PADRAO (use como referencia ao perguntar sobre perdas):
             {
                 "type": "function",
                 "function": {
-                    "name": "gerar_ficha_operacional",
-                    "description": "Gera a ficha operacional em PDF quando todos os dados foram coletados e o cliente confirmou.",
-                    "parameters": {
-                        "type": "object",
-                        "properties": {
-                            "nome_prato":        {"type": "string"},
-                            "classificacao":     {"type": "string"},
-                            "codigo":            {"type": "string"},
-                            "rendimento_porcoes": {"type": "number"},
-                            "ingredientes_op": {
-                                "type": "array",
-                                "items": {
-                                    "type": "object",
-                                    "properties": {
-                                        "qtd":  {"type": "string"},
-                                        "nome": {"type": "string"},
-                                    },
-                                    "required": ["qtd", "nome"]
-                                }
-                            },
-                            "modo_preparo": {"type": "array", "items": {"type": "string"}},
-                        },
-                        "required": ["nome_prato", "classificacao", "ingredientes_op"]
-                    }
-                }
-            },
-            {
-                "type": "function",
-                "function": {
                     "name": "salvar_ingredientes",
                     "description": "Salva ingredientes na base do cliente apÃ³s coletar nome, unidade, custo, FC e IC.",
                     "parameters": {
@@ -1103,7 +1080,8 @@ BASE DE PERDAS PADRAO (use como referencia ao perguntar sobre perdas):
         resposta = _gpt.chat.completions.create(
             model=modelo_escolhido,
             messages=mensagens_openai,
-            tools=tools
+            tools=tools,
+            timeout=60,
         )
 
         message = resposta.choices[0].message
@@ -1129,7 +1107,7 @@ BASE DE PERDAS PADRAO (use como referencia ao perguntar sobre perdas):
                 try:
                     tool_input = json.loads(tool_call.function.arguments)
                 except json.JSONDecodeError:
-                    logger.error(f"Erro ao decodificar argumentos da função {tool_name}")
+                    logger.error("Erro ao decodificar argumentos da função %s", tool_name)
                     continue
 
                 if tool_name == "gerar_ficha_tecnica":
@@ -1138,16 +1116,10 @@ BASE DE PERDAS PADRAO (use como referencia ao perguntar sobre perdas):
                     continue
 
                 elif tool_name == "gerar_ficha_operacional":
-                    if texto_resposta and not texto_enviado:
-                        whatsapp.enviar_texto(telefone, texto_resposta)
-                        texto_enviado = True
-                    tool_input["estabelecimento"] = assinante.get("estabelecimento", "")
-                    dados_pdf = _montar_dados_operacionais(
-                        tool_input,
-                        foto_path=tool_input.get("foto_path", ""),
-                        modo_preparo=tool_input.get("modo_preparo", []),
-                    )
-                    _gerar_e_enviar_arquivo(telefone, dados_pdf, "operacional", assinante)
+                    # GUARD: IA nao deve chamar esta tool diretamente.
+                    # Redireciona para o fluxo correto via gerar_ficha_tecnica.
+                    logger.warning("[Agente] IA chamou gerar_ficha_operacional diretamente — ignorando. O fluxo correto é via gerar_ficha_tecnica → estado aguardando_decisao_ficha_operacional.")
+                    continue
 
                 elif tool_name == "salvar_ingredientes":
                     for ing in tool_input.get("ingredientes", []):
@@ -1174,7 +1146,7 @@ BASE DE PERDAS PADRAO (use como referencia ao perguntar sobre perdas):
 
     except Exception as e:
         safe_msg = repr(e).encode('utf-8', 'ignore').decode('utf-8')
-        logger.error(f"[OpenAI] Erro: {safe_msg}")
+        logger.error("[OpenAI] Erro: %s", safe_msg)
         _registrar_falha(telefone, assinante)
 
 
@@ -1192,7 +1164,7 @@ def _gerar_e_enviar_arquivo(telefone: str, dados: dict, tipo: str, assinante: di
             whatsapp.enviar_texto(telefone, _msg("gerando_ficha", nome_prato=nome_prato_limpo))
 
         cobrar_credito = _deve_consumir_credito_por_prato(telefone, nome_prato_limpo)
-        logger.debug(f"[Credito] prato={nome_prato_limpo} cobrar_credito={cobrar_credito} tipo={tipo}")
+        logger.debug("[Credito] prato=%s cobrar_credito=%s tipo=%s", nome_prato_limpo, cobrar_credito, tipo)
 
         if tipo == "combo":
             caminho_tecnica = _gerar_enviar_registrar_arquivo(
@@ -1212,7 +1184,7 @@ def _gerar_e_enviar_arquivo(telefone: str, dados: dict, tipo: str, assinante: di
                 tipo_arquivo="operacional",
                 nome_prato=nome_prato_limpo,
             )
-            logger.info(f"[Gerador] Combo concluido: tecnica={caminho_tecnica} operacional={caminho_operacional}")
+            logger.info("[Gerador] Combo concluido: tecnica=%s operacional=%s", caminho_tecnica, caminho_operacional)
         else:
             dados_exec = dados
             if tipo == "operacional":
@@ -1227,13 +1199,13 @@ def _gerar_e_enviar_arquivo(telefone: str, dados: dict, tipo: str, assinante: di
                 tipo_arquivo=tipo,
                 nome_prato=nome_prato_limpo,
             )
-            logger.info(f"[Gerador] Arquivo {tipo} concluido: {caminho_final}")
+            logger.info("[Gerador] Arquivo %s concluido: %s", tipo, caminho_final)
 
         if cobrar_credito:
             banco.incrementar_ficha(telefone)
-            logger.info(f"[Credito] +1 credito aplicado para {telefone} ({nome_prato_limpo})")
+            logger.info("[Credito] +1 credito aplicado para %s (%s)", telefone, nome_prato_limpo)
         else:
-            logger.debug(f"[Credito] Nenhum credito adicional para {telefone} ({nome_prato_limpo})")
+            logger.debug("[Credito] Nenhum credito adicional para %s (%s)", telefone, nome_prato_limpo)
 
         _salvar_ingredientes_da_ficha(telefone, dados)
 
@@ -1243,7 +1215,7 @@ def _gerar_e_enviar_arquivo(telefone: str, dados: dict, tipo: str, assinante: di
 
     except Exception as e:
         safe_msg = str(e).encode('utf-8', 'ignore').decode('utf-8')
-        logger.error(f"[Gerador] Erro ao gerar arquivo: {safe_msg}")
+        logger.error("[Gerador] Erro ao gerar arquivo: %s", safe_msg)
         whatsapp.enviar_texto(telefone, _msg("erro_gerar_ficha"))
         banco.criar_notificacao(
             "erro_sistema",
@@ -1277,7 +1249,7 @@ def _gerar_enviar_registrar_arquivo(telefone: str, dados: dict, tipo_arquivo: st
         caminho_final = storage.salvar_arquivo(telefone, nome_arquivo, caminho_origem=caminho_tmp)
         whatsapp.enviar_arquivo(telefone, caminho_final, caption=caption)
         _registrar_ficha_gerada(telefone, dados, tipo_arquivo, nome_prato, caminho_final)
-        logger.info(f"[Gerador] {tipo_arquivo} enviado para {telefone}: {caminho_final}")
+        logger.info("[Gerador] %s enviado para %s: %s", tipo_arquivo, telefone, caminho_final)
         return caminho_final
 
 
@@ -1300,7 +1272,7 @@ def _registrar_ficha_gerada(telefone: str, dados: dict, tipo: str, nome_prato: s
             "arquivo_path": caminho_final,
         },
     )
-    logger.info(f"[Banco] Ficha registrada tipo={tipo} prato={nome_prato}")
+    logger.info("[Banco] Ficha registrada tipo=%s prato=%s", tipo, nome_prato)
 
 
 def _salvar_ingredientes_da_ficha(telefone: str, dados: dict) -> None:
@@ -1315,13 +1287,21 @@ def _salvar_ingredientes_da_ficha(telefone: str, dados: dict) -> None:
             ing.get("ic", 1.0),
         )
     if ingredientes:
-        logger.info(f"[Banco] Ingredientes atualizados: {len(ingredientes)} item(ns)")
+        logger.info("[Banco] Ingredientes atualizados: %s item(ns)", len(ingredientes))
 
 
 def _calcular_custo_total(dados: dict) -> float:
+    """Custo total = soma de (custo_unit × peso_bruto) de cada ingrediente.
+    peso_bruto = peso_liquido × FC (o que efetivamente se compra)."""
     total = 0.0
     for ing in dados.get("ingredientes", []):
-        total += ing.get("custo_unit", 0) * ing.get("peso_liquido", 0)
+        pb = ing.get("peso_bruto", 0)
+        pl = ing.get("peso_liquido", 0)
+        fc = ing.get("fc", 1.0) or 1.0
+        # Se peso_bruto não veio, calcula a partir de peso_liquido × FC
+        if not pb and pl:
+            pb = pl * fc
+        total += ing.get("custo_unit", 0) * pb
     return round(total, 2)
 
 
@@ -1383,6 +1363,6 @@ def _enviar_link_renovacao(telefone: str, assinante: dict, metodo: str) -> None:
 
         whatsapp.enviar_texto(telefone, _msg("link_renovacao", metodo=metodo, link=link))
     except Exception as e:
-        logger.error(f"[Renovacao] Erro ao gerar link de renovacao para {telefone}: {e}")
+        logger.error("[Renovacao] Erro ao gerar link de renovacao para %s: %s", telefone, e)
         whatsapp.enviar_texto(telefone, _msg("erro_renovacao"))
 

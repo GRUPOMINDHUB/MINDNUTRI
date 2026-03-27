@@ -222,11 +222,18 @@ def criar_cobranca_avulsa(telefone: str, valor: float, descricao: str) -> str:
 
 def processar_webhook_asaas(evento: str, payment_data: dict) -> None:
     """
-    Processa webhooks do Asaas:
-    PAYMENT_CONFIRMED/PAYMENT_RECEIVED -> ativa ou renova
-    PAYMENT_OVERDUE -> marca inadimplente
-    SUBSCRIPTION_INACTIVATED -> cancela
+    Processa webhooks do Asaas com idempotência.
+    Cada payment_id + evento é processado no máximo uma vez.
     """
+    from painel.models import WebhookProcessado
+
+    # Idempotência: monta chave única (payment_id + evento)
+    payment_id = payment_data.get("id", "")
+    evento_id = f"{evento}:{payment_id}" if payment_id else ""
+    if evento_id and WebhookProcessado.ja_processado(evento_id):
+        logger.info("[Asaas] Webhook duplicado ignorado: %s", evento_id)
+        return
+
     customer_id = payment_data.get("customer", "")
     payment_link_id = payment_data.get("paymentLink", "")
 
@@ -296,6 +303,10 @@ def processar_webhook_asaas(evento: str, payment_data: dict) -> None:
             f"{assinante.get('nome', telefone)} - assinatura cancelada.",
             telefone,
         )
+
+    # Registra evento como processado (idempotência)
+    if evento_id:
+        WebhookProcessado.registrar(evento_id, evento)
 
 
 def _buscar_por_customer_id(customer_id: str) -> dict | None:

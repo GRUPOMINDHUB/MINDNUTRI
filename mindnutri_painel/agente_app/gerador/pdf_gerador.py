@@ -1,3 +1,7 @@
+import logging
+import os
+from pathlib import Path
+
 from reportlab.lib.pagesizes import A4, landscape
 from reportlab.lib import colors
 from reportlab.lib.units import mm
@@ -6,8 +10,8 @@ from reportlab.platypus import Paragraph
 from reportlab.lib.styles import ParagraphStyle
 from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase import ttfonts
-from pathlib import Path
-import os
+
+logger = logging.getLogger(__name__)
 
 LOGO_PATH = Path(__file__).parent.parent / "assets" / "logo_mindhub.png"
 PAGE_W, PAGE_H = landscape(A4)
@@ -48,12 +52,12 @@ def _registrar_fontes_utf8() -> tuple[str, str]:
                     pdfmetrics.registerFont(ttfonts.TTFont(nome_regular, str(caminho_regular)))
                 if nome_bold not in pdfmetrics.getRegisteredFontNames():
                     pdfmetrics.registerFont(ttfonts.TTFont(nome_bold, str(caminho_bold)))
-                print(f"[PDF] Fonte UTF-8 registrada: {nome_regular}/{nome_bold}")
+                logger.debug("[PDF] Fonte UTF-8 registrada: %s/%s", nome_regular, nome_bold)
                 return nome_regular, nome_bold
             except Exception as exc:
-                print(f"[PDF] Falha ao registrar fonte {nome_regular}: {exc}")
+                logger.warning("[PDF] Falha ao registrar fonte %s: %s", nome_regular, exc)
 
-    print("[PDF] Usando fallback Helvetica.")
+    logger.debug("[PDF] Usando fallback Helvetica.")
     return regular_name, bold_name
 
 

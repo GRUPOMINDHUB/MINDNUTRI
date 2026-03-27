@@ -23,25 +23,45 @@ _MIME_TYPES: dict[str, str] = {
 }
 
 
-def _post(endpoint: str, payload: dict) -> dict:
+_MAX_RETRIES: int = 2
+_RETRY_DELAY: float = 1.5  # segundos entre retries
+
+
+def _post(endpoint: str, payload: dict, tentativas: int = 1) -> dict:
+    """POST genérico para a Evolution API com retry opcional."""
     url = f"{BASE}/{endpoint}/{INST}"
+    last_error: Exception | None = None
+    for attempt in range(tentativas):
+        try:
+            r = requests.post(url, json=payload, headers=HEADERS, timeout=30)
+            r.raise_for_status()
+            return r.json()
+        except Exception as e:
+            last_error = e
+            if attempt < tentativas - 1:
+                import time
+                time.sleep(_RETRY_DELAY)
+                logger.warning("[Evolution] Retry %d/%d para %s", attempt + 1, tentativas - 1, endpoint)
+    logger.error("[Evolution] Erro em %s apos %d tentativa(s): %s", endpoint, tentativas, last_error)
+    return {}
+
+
+def enviar_presenca(telefone: str, presenca: str = "composing") -> None:
+    """
+    Envia indicador de presença (digitando...) via Evolution API.
+    presenca: 'composing' (digitando), 'recording' (gravando), 'paused' (parou)
+    """
+    url = f"{config.EVOLUTION_API_URL}/chat/updatePresence/{INST}"
     try:
-        r = requests.post(url, json=payload, headers=HEADERS, timeout=30)
-        r.raise_for_status()
-        return r.json()
-    except Exception as e:
-        safe_endpoint = str(endpoint).encode('utf-8', 'ignore').decode('utf-8')
-        safe_msg = str(e).encode('utf-8', 'ignore').decode('utf-8')
-        logger.error("[Evolution] Erro em %s: %s", safe_endpoint, safe_msg)
-        return {}
+        requests.post(url, json={"number": telefone, "presence": presenca},
+                      headers=HEADERS, timeout=5)
+    except Exception:
+        pass  # Presença é best-effort, não deve quebrar o fluxo
 
 
 def enviar_texto(telefone: str, texto: str) -> dict:
-    """Envia mensagem de texto simples."""
-    return _post("sendText", {
-        "number": telefone,
-        "text": texto,
-    })
+    """Envia mensagem de texto simples com retry."""
+    return _post("sendText", {"number": telefone, "text": texto}, tentativas=_MAX_RETRIES)
 
 
 def enviar_arquivo(telefone: str, caminho: str, caption: str = "") -> dict:
@@ -60,7 +80,7 @@ def enviar_arquivo(telefone: str, caminho: str, caption: str = "") -> dict:
         "media": b64,
         "fileName": nome_arquivo,
         "caption": caption,
-    })
+    }, tentativas=_MAX_RETRIES)
 
 
 def enviar_imagem(telefone: str, caminho: str, caption: str = "") -> dict:
@@ -79,7 +99,7 @@ def enviar_imagem(telefone: str, caminho: str, caption: str = "") -> dict:
         "media": b64,
         "fileName": nome_arquivo,
         "caption": caption,
-    })
+    }, tentativas=_MAX_RETRIES)
 
 
 def baixar_midia(media_url: str = None, media_key: str = None,

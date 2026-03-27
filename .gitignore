@@ -9,3 +9,21 @@ db.sqlite3
 media/
 node_modules/
 .DS_Store
+.claude/
+.codex_tmp/
+
+# Logs
+*.log
+runserver.*.log
+agente_debug.log
+
+# Generated files
+mindnutri_painel/arquivos_gerados/
+mindnutri_painel/webhook_payloads.txt
+webhook_payloads.txt
+
+# Temp/utility
+cookies.txt
+create_user.py
+mindnutri_qr.png
+qr.html

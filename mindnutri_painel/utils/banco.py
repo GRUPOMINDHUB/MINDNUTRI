@@ -1,8 +1,10 @@
 import json
 import logging
-from datetime import datetime, timedelta, date
+from datetime import timedelta
+
 from django.utils import timezone
-from painel.models import Assinante, FichaTecnica, Notificacao, Conversa, Ingrediente, EstadoConversa
+
+from painel.models import Assinante, Conversa, EstadoConversa, FichaTecnica, Ingrediente, Notificacao
 
 logger = logging.getLogger(__name__)
 

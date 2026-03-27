@@ -402,3 +402,31 @@ class MensagemBot(models.Model):
                 ))
         if novas:
             cls.objects.bulk_create(novas)
+
+
+class WebhookProcessado(models.Model):
+    """Registro de webhooks já processados para garantir idempotência."""
+    evento_id = models.CharField(max_length=200, unique=True)
+    evento_tipo = models.CharField(max_length=80)
+    processado_em = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        verbose_name = 'Webhook Processado'
+        verbose_name_plural = 'Webhooks Processados'
+
+    def __str__(self):
+        return f"{self.evento_tipo} — {self.evento_id}"
+
+    @classmethod
+    def ja_processado(cls, evento_id: str) -> bool:
+        return cls.objects.filter(evento_id=evento_id).exists()
+
+    @classmethod
+    def registrar(cls, evento_id: str, evento_tipo: str) -> None:
+        cls.objects.get_or_create(evento_id=evento_id, defaults={"evento_tipo": evento_tipo})
+
+    @classmethod
+    def limpar_antigos(cls, dias: int = 30) -> int:
+        limite = timezone.now() - timedelta(days=dias)
+        qtd, _ = cls.objects.filter(processado_em__lt=limite).delete()
+        return qtd
