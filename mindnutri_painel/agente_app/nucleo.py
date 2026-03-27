@@ -351,12 +351,23 @@ def _fluxo_pre_assinatura(telefone: str, texto: str, texto_lower: str, estado: d
     # Aguardando resposta de interesse após demo
     if est == "aguardando_interesse":
         cupom = _dados_cupom(estado)
-        if any(w in texto_lower for w in ("sim", "quero", "gostei", "interessei", "claro", "bora", "vamos", "show", "top", "saber", "mais", "conta")):
+        _POSITIVOS = ("sim", "quero", "gostei", "gosti", "gostey", "interessei",
+                       "claro", "bora", "vamos", "show", "top", "saber", "mais",
+                       "conta", "legal", "massa", "demais", "adorei", "amei",
+                       "curti", "curtir", "bacana", "otimo", "ótimo", "dahora",
+                       "assinar", "pagar", "contratar", "quero sim")
+        _NEGATIVOS = ("nao", "não", "depois", "agora nao", "agora não",
+                       "sem interesse", "nao quero", "não quero", "talvez")
+        if any(w in texto_lower for w in _POSITIVOS):
             banco.set_estado(telefone, "aguardando_decisao_assinar", cupom)
             whatsapp.enviar_texto(telefone, _msg("oferta_pos_demo", valor=f"{config.PLANO_VALOR:.2f}"))
-        else:
+        elif any(w in texto_lower for w in _NEGATIVOS):
             whatsapp.enviar_texto(telefone, _msg("nao_tem_interesse"))
             banco.set_estado(telefone, "inicio", {})
+        else:
+            # Não entendeu — assume positivo e mostra oferta (melhor converter do que perder)
+            banco.set_estado(telefone, "aguardando_decisao_assinar", cupom)
+            whatsapp.enviar_texto(telefone, _msg("oferta_pos_demo", valor=f"{config.PLANO_VALOR:.2f}"))
         return
 
     # Aguardando decisão de assinar
