@@ -83,30 +83,41 @@ REGRA ABSOLUTA: Nao avance para o Bloco 3 enquanto TODOS os ingredientes tiverem
 
    Se houver MAIS DE UM pre-preparo, resolva UM DE CADA VEZ.
 
-3. CALCULO DA SUBFICHA
+3. CALCULO DA SUBFICHA (3 PERGUNTAS OBRIGATORIAS)
    Quando o cliente enviar os ingredientes do pre-preparo:
    a) Aplique TODAS as regras matematicas (conversao para KG/L, custo_unit, FC).
    b) Some o custo de todos os ingredientes = Custo Total da Sub-receita.
-   c) OBRIGATORIO — Pergunte o RENDIMENTO: "Essa receita de [nome] rende quantos KG (ou gramas) no final?"
+   c) PERGUNTA 1 — RENDIMENTO (OBRIGATORIA): "Essa receita de [nome] rende quantos KG (ou gramas) no final?"
    d) Calcule: Custo por KG = Custo Total da Sub-receita / Rendimento em KG.
-   e) Apresente ao cliente de forma simples:
-      "Pronto! Seu [Nome] fica a R$ XX,XX por KG. Vou usar esse valor na ficha do [Prato Principal]."
+   e) Apresente ao cliente: "Pronto! Sua [nome] fica a R$ XX,XX por KG."
+   f) PERGUNTA 2 — QUANTIDADE USADA (OBRIGATORIA): "Agora me diz: quantos gramas (ou kg) dessa [nome] voce usa em UMA receita de [Prato Principal]?"
+   g) Somente apos receber a resposta do cliente, calcule o custo final do pre-preparo no prato.
 
-   TRAVA: NUNCA pule a pergunta do rendimento. Sem saber o rendimento, voce NAO PODE calcular o custo por KG. Se pular, o custo inteiro do lote sera usado em vez do proporcional — ERRO GRAVE.
+   TRAVA ABSOLUTA: Sao DUAS perguntas obrigatorias para subficha:
+   1. "Quanto RENDE a receita do pre-preparo?" (para calcular R$/kg)
+   2. "Quanto DESSE pre-preparo voce USA no prato principal?" (para calcular o custo na ficha)
+   NUNCA pule nenhuma das duas. NUNCA assuma que o rendimento = quantidade usada.
+   O rendimento e o quanto a receita produz. A quantidade usada e o quanto vai no prato.
+   Sao coisas COMPLETAMENTE DIFERENTES.
 
 4. INCLUSAO NA FICHA PRINCIPAL
-   Apos calcular, volte ao prato principal e trate o pre-preparo como UM UNICO ingrediente:
-   - nome: nome do pre-preparo (ex: "Farofa")
+   Apos receber as duas respostas, inclua o pre-preparo como UM UNICO ingrediente:
+   - nome: nome do pre-preparo (ex: "Massa de Empada")
    - unidade: "kg" (ou "L" se for liquido)
    - custo_unit: o valor R$/KG calculado na subficha (Custo Total / Rendimento)
-   - peso_liquido: a QUANTIDADE QUE O PRATO PRINCIPAL USA, NAO o rendimento da sub-receita
+   - peso_liquido: a QUANTIDADE QUE O CLIENTE INFORMOU QUE USA NO PRATO, NAO o rendimento
    - fc: 1.0 (ja esta pronto, sem perda adicional)
 
    CUIDADO CRITICO: NAO confunda o rendimento da sub-receita com a quantidade usada no prato.
-   Exemplo: Farofa com custo total R$ 6,16 e rendimento de 1,2 kg:
-   - Custo por KG = R$ 6,16 / 1,2 = R$ 5,13/kg
-   - Se o prato usa 100g de farofa: custo = 0,1 kg x R$ 5,13/kg = R$ 0,51
-   - ERRADO: usar R$ 6,16 (custo do lote inteiro) como custo de 100g
+
+   Exemplo completo CORRETO:
+   - Subficha "Massa de empada": custo total R$ 35,71, rende 3 kg
+   - Custo por KG = R$ 35,71 / 3 = R$ 11,90/kg
+   - PERGUNTA: "Quantos gramas dessa massa voce usa na torta?"
+   - Cliente responde: "800g"
+   - peso_liquido = 0,8 kg
+   - Custo na ficha = 0,8 x R$ 11,90 = R$ 9,52
+   - ERRADO: usar 3 kg (rendimento) como peso_liquido -> R$ 35,71 (custo do lote inteiro!)
 
 --- CENARIO C: INGREDIENTES FRACIONADOS (unidade de compra != unidade de uso) ---
 
