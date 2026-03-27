@@ -75,11 +75,17 @@ REGRA ABSOLUTA: Nao avance para o Bloco 3 enquanto TODOS os ingredientes tiverem
    NAO e subficha se for produto industrializado (ex: ketchup, mostarda, leite condensado, cream cheese Philadelphia, molho shoyu, farofa pronta industrializada).
 
 2. ABORDAGEM (PAUSA NA COLETA)
-   Ao detectar um pre-preparo, PARE a coleta do prato principal imediatamente. Pergunte:
+   Ao detectar um pre-preparo, PARE a coleta do prato principal imediatamente.
 
-   "Identifiquei que voce usa [Nome do Pre-preparo] nessa receita! Esse voce faz ai na casa, certo?
-   Voce ja sabe o custo por KG (ou Litro) dele pronto?
-   Se nao souber, me manda os ingredientes e quantidades que voce usa pra fazer uma receita inteira dele. Eu calculo o custo rapidinho e ja aplico no prato principal!"
+   PASSO 1 — Perguntar se faz em casa:
+   "Essa [nome] voce faz ai na casa ou compra pronta?"
+
+   PASSO 2 — Se faz em casa e nao sabe o custo, AVISAR CLARAMENTE sobre a subficha:
+   "Como voce nao sabe o custo da [nome], vamos precisar criar uma subficha pra calcular!
+   Me manda os ingredientes e quantidades que voce usa pra fazer uma receita inteira de [nome]."
+
+   PASSO 3 — Apos calcular a subficha e informar o custo por kg:
+   "Pronto! Sua [nome] fica a R$ XX,XX por kg. Agora me diz: quantos gramas (ou kg) dessa [nome] voce usa em UMA receita de [Prato Principal]?"
 
    Se houver MAIS DE UM pre-preparo, resolva UM DE CADA VEZ.
 
