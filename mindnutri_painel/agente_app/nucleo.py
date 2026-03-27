@@ -239,9 +239,10 @@ def _fluxo_assinante_ativo(telefone: str, texto: str, texto_lower: str,
 
     # Reset no meio de uma ficha: pede confirmação
     ESTADOS_FICHA = (
-        "aguardando_confirmacao_geracao", "oferecendo_pdf",
-        "aguardando_decisao_ficha_operacional", "coletando_foto_preparo",
-        "aguardando_foto_operacional", "aguardando_modo_preparo_operacional",
+        "aguardando_confirmacao_geracao", "aguardando_confirmacao_resumo",
+        "oferecendo_pdf", "aguardando_decisao_ficha_operacional",
+        "coletando_foto_preparo", "aguardando_foto_operacional",
+        "aguardando_modo_preparo_operacional",
     )
     if est.startswith("criando_ficha") or est in ESTADOS_FICHA:
         if texto_lower in ("cancelar", "nova ficha", "novo prato", "recomeçar ficha"):
@@ -264,6 +265,10 @@ def _fluxo_assinante_ativo(telefone: str, texto: str, texto_lower: str,
 
     if est.startswith("criando_ficha"):
         _conversar_com_ia(telefone, texto, assinante)
+        return
+
+    if est == "aguardando_confirmacao_resumo":
+        _fluxo_confirmacao_resumo(telefone, texto, estado, assinante)
         return
 
     if est == "aguardando_confirmacao_geracao":
@@ -667,6 +672,33 @@ def _enviar_menu_principal(telefone: str, assinante: dict) -> None:
 
 
 
+def _fluxo_confirmacao_resumo(telefone: str, texto: str, estado: dict, assinante: dict) -> None:
+    """
+    Aguarda 'GERAR' após resumo calculado pelo código.
+    Se confirmar → pergunta se quer ficha operacional (PDF).
+    Se pedir correção → volta pra IA com contexto.
+    """
+    texto_lower = (texto or "").strip().lower()
+    dados_fluxo = estado.get("dados", {})
+
+    if any(p in texto_lower for p in ("gerar", "gera", "pode gerar", "sim", "ok", "confirma", "👍")):
+        # Avança para perguntar sobre PDF operacional
+        banco.set_estado(telefone, "aguardando_decisao_ficha_operacional", dados_fluxo)
+        whatsapp.enviar_texto(telefone, _msg("pergunta_ficha_operacional"))
+        logger.info("[Fluxo] Cliente %s confirmou resumo — perguntando sobre PDF", telefone)
+        return
+
+    if any(p in texto_lower for p in ("cancelar", "desistir", "nao", "não")):
+        banco.resetar_estado(telefone)
+        whatsapp.enviar_texto(telefone, _msg("cancelei_geracao"))
+        return
+
+    # Cliente pediu correção — volta pra IA com os dados atuais
+    banco.set_estado(telefone, "criando_ficha", dados_fluxo)
+    banco.salvar_mensagem(telefone, "assistant", "[Sistema: cliente pediu correção no resumo. Ajuste conforme solicitado e chame gerar_ficha_tecnica novamente quando pronto.]")
+    _conversar_com_ia(telefone, texto, assinante)
+
+
 def _fluxo_confirmacao_geracao(telefone: str, texto: str, estado: dict, assinante: dict) -> None:
     """Aguarda confirmação do cliente para gerar o arquivo."""
     if any(p in texto.lower() for p in ["sim", "gera", "pode", "ok", "yes", "confirma", "👍"]):
@@ -793,20 +825,94 @@ def _montar_dados_operacionais(dados_tecnica: dict, foto_path: str = "", modo_pr
     return dados_pdf
 
 
+def _montar_resumo_calculado(dados_tecnica: dict) -> str:
+    """
+    Monta o resumo da ficha com TODOS os cálculos feitos em Python.
+    O LLM NUNCA faz contas — este código é a fonte da verdade.
+    """
+    nome_prato = dados_tecnica.get("nome_prato", "Preparação")
+    ingredientes = dados_tecnica.get("ingredientes", [])
+
+    linhas = [f"Resumo da Ficha: {nome_prato}", ""]
+
+    custo_total = 0.0
+    for idx, ing in enumerate(ingredientes, 1):
+        nome = ing.get("nome", "?")
+        pl = float(ing.get("peso_liquido", 0) or 0)
+        fc = float(ing.get("fc", 1.0) or 1.0)
+        ic = float(ing.get("ic", 1.0) or 1.0)
+        cu = float(ing.get("custo_unit", 0) or 0)
+        pb = float(ing.get("peso_bruto", 0) or 0)
+        unidade = (ing.get("unidade", "kg") or "kg").strip()
+
+        # Calcular peso_bruto se não veio
+        if not pb and pl:
+            pb = pl * fc
+
+        custo_ing = round(cu * pb, 2)
+        custo_total += custo_ing
+
+        # Atualizar o dicionário para garantir consistência na geração
+        ing["peso_bruto"] = round(pb, 4)
+
+        # Formatar linha do resumo
+        if "(subficha)" in nome.lower() or ing.get("subficha"):
+            linhas.append(f"{idx}. {nome} (subficha): {pb:.3f}{unidade} x R$ {cu:.2f}/{unidade} = R$ {custo_ing:.2f}")
+        elif fc > 1.01:
+            linhas.append(f"{idx}. {nome}: {pl:.3f}{unidade} x FC {fc:.2f} = {pb:.3f}{unidade} x R$ {cu:.2f}/{unidade} = R$ {custo_ing:.2f}")
+        elif ic > 1.01:
+            peso_cozido = pl * ic
+            linhas.append(f"{idx}. {nome}: {pl:.3f}{unidade} cru (rende {peso_cozido:.3f}{unidade} cozido) x R$ {cu:.2f}/{unidade} = R$ {custo_ing:.2f}")
+        else:
+            linhas.append(f"{idx}. {nome}: {pb:.3f}{unidade} x R$ {cu:.2f}/{unidade} = R$ {custo_ing:.2f}")
+
+    custo_total = round(custo_total, 2)
+
+    # Porções
+    rendimento_porcoes = dados_tecnica.get("rendimento_porcoes")
+    peso_porcao = float(dados_tecnica.get("peso_porcao_kg", 0) or 0)
+
+    linhas.append("")
+    linhas.append(f"Custo Total: R$ {custo_total:.2f}")
+
+    if rendimento_porcoes and float(rendimento_porcoes) > 0:
+        n_porcoes = float(rendimento_porcoes)
+        custo_porcao = round(custo_total / n_porcoes, 2)
+        linhas.append(f"Porcoes: {n_porcoes:.0f} | Custo por Porcao: R$ {custo_porcao:.2f}")
+    elif peso_porcao > 0:
+        # Calcular rendimento a partir da soma dos ingredientes
+        rend_total = sum(
+            float(i.get("peso_liquido", 0) or 0) * float(i.get("ic", 1.0) or 1.0)
+            for i in ingredientes
+        )
+        if rend_total > 0:
+            n_porcoes = rend_total / peso_porcao
+            custo_porcao = round(custo_total / n_porcoes, 2)
+            linhas.append(f"Porcoes: {n_porcoes:.0f} | Custo por Porcao: R$ {custo_porcao:.2f}")
+
+    linhas.append("")
+    linhas.append('Tudo certo? Digite "GERAR" para receber seu PDF e Excel.')
+    linhas.append('Se algo estiver errado, me diga o que corrigir.')
+
+    return "\n".join(linhas)
+
+
 def _iniciar_fluxo_pos_coleta_tecnica(telefone: str, dados_tecnica: dict) -> None:
     """
-    Dados coletados pela IA. Pergunta se quer PDF operacional.
-    - SIM → coleta foto + modo de preparo → gera EXCEL + PDF juntos (combo)
-    - NÃO → gera só o EXCEL
+    Dados coletados pela IA. Monta resumo calculado por código (não pelo LLM)
+    e aguarda confirmação do cliente.
     """
+    # Gera o resumo com cálculos feitos em Python
+    resumo = _montar_resumo_calculado(dados_tecnica)
+
     dados_fluxo = {
         "tecnica_dados": dados_tecnica,
         "modo_preparo": dados_tecnica.get("modo_preparo", []),
         "foto_path": "",
     }
-    banco.set_estado(telefone, "aguardando_decisao_ficha_operacional", dados_fluxo)
-    whatsapp.enviar_texto(telefone, _msg("pergunta_ficha_operacional"))
-    logger.debug("[Fluxo] Pergunta sobre PDF enviada para %s", telefone)
+    banco.set_estado(telefone, "aguardando_confirmacao_resumo", dados_fluxo)
+    whatsapp.enviar_texto(telefone, resumo)
+    logger.info("[Fluxo] Resumo calculado enviado para %s — aguardando GERAR", telefone)
 
 
 def _finalizar_fluxo_geracao_integrada(telefone: str, fluxo: dict, assinante: dict) -> None:
@@ -1004,7 +1110,7 @@ BASE DE PERDAS PADRAO (use como referencia ao perguntar sobre perdas):
                 "type": "function",
                 "function": {
                     "name": "gerar_ficha_tecnica",
-                    "description": "Gera a ficha tÃ©cnica em XLSX quando todos os dados foram coletados e o cliente confirmou a geraÃ§Ã£o.",
+                    "description": "Chame quando todos os dados estiverem coletados. NAO faca resumo nem calculos — o sistema gera o resumo automaticamente com calculos corretos. Apenas passe os dados coletados.",
                     "parameters": {
                         "type": "object",
                         "properties": {

@@ -17,6 +17,7 @@ from agente_app.nucleo import (
     _formatar_qtd_operacional,
     _montar_ingredientes_operacionais,
     _calcular_custo_total,
+    _montar_resumo_calculado,
     _processar_midia,
     _interpretar_metodo_pagamento,
 )
@@ -208,6 +209,62 @@ class CalculoCustoTest(TestCase):
         self.assertEqual(result[0]["nome"], "Farinha")
         self.assertEqual(result[0]["qtd"], "500g")
         self.assertEqual(result[1]["qtd"], "200ml")
+
+
+# ── RESUMO CALCULADO POR CÓDIGO ──────────────────────────────────
+
+class ResumoCalculadoTest(TestCase):
+    def test_resumo_custo_correto_com_fc(self):
+        """Resumo deve usar peso_bruto (pl × FC) para custo."""
+        dados = {
+            "nome_prato": "Torta Nordestina",
+            "ingredientes": [
+                {"nome": "Carne seca", "peso_liquido": 0.5, "fc": 1.05, "ic": 1.0, "custo_unit": 80.0, "unidade": "kg"},
+                {"nome": "Cebola", "peso_liquido": 0.3, "fc": 1.20, "ic": 1.0, "custo_unit": 5.0, "unidade": "kg"},
+            ],
+            "rendimento_porcoes": 10,
+        }
+        resumo = _montar_resumo_calculado(dados)
+        # Carne: 0.5 × 1.05 = 0.525 × 80 = 42.00
+        # Cebola: 0.3 × 1.20 = 0.36 × 5 = 1.80
+        # Total: 43.80
+        self.assertIn("R$ 42.00", resumo)
+        self.assertIn("R$ 1.80", resumo)
+        self.assertIn("R$ 43.80", resumo)
+        self.assertIn("Porcoes: 10", resumo)
+        self.assertIn("R$ 4.38", resumo)  # 43.80 / 10
+
+    def test_resumo_porcoes_calculadas(self):
+        """3kg rendimento / 0.3kg porção = 10 porções, não 3."""
+        dados = {
+            "nome_prato": "Torta",
+            "ingredientes": [
+                {"nome": "Massa", "peso_liquido": 3.0, "fc": 1.0, "ic": 1.0, "custo_unit": 10.0, "unidade": "kg"},
+            ],
+            "rendimento_porcoes": 10,
+            "peso_porcao_kg": 0.3,
+        }
+        resumo = _montar_resumo_calculado(dados)
+        self.assertIn("Porcoes: 10", resumo)
+        self.assertIn("R$ 3.00", resumo)  # 30.00 / 10
+
+    def test_resumo_sem_porcoes(self):
+        """Sem rendimento_porcoes mas com peso_porcao, calcula automaticamente."""
+        dados = {
+            "nome_prato": "Bolo",
+            "ingredientes": [
+                {"nome": "Farinha", "peso_liquido": 1.0, "fc": 1.0, "ic": 1.0, "custo_unit": 5.0, "unidade": "kg"},
+            ],
+            "peso_porcao_kg": 0.1,
+        }
+        resumo = _montar_resumo_calculado(dados)
+        # rendimento = 1.0 × IC 1.0 = 1.0kg, porção 0.1kg → 10 porções
+        self.assertIn("Porcoes: 10", resumo)
+
+    def test_resumo_sem_ingredientes(self):
+        dados = {"nome_prato": "Vazio", "ingredientes": []}
+        resumo = _montar_resumo_calculado(dados)
+        self.assertIn("R$ 0.00", resumo)
 
 
 # ── PROCESSAMENTO DE MÍDIA ───────────────────────────────────────
