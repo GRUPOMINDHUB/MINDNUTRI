@@ -119,9 +119,9 @@ MENSAGENS_PADRAO = [
         "texto": (
             "{abertura}\n\n"
             "1️⃣ *Cartão de crédito*\n"
-            "Assinatura recorrente automática, sem boleto.\n\n"
+            "Pagamento único do plano mensal.\n\n"
             "2️⃣ *Pix*\n"
-            "Pagamento do ciclo atual via Pix.\n\n"
+            "Pagamento único via Pix.\n\n"
             "Responda com *1*, *2*, *CARTÃO* ou *PIX*."
         ),
         "variaveis": "abertura",
@@ -139,10 +139,12 @@ MENSAGENS_PADRAO = [
             "Você é o assistente de cadastro do Mindnutri. "
             "Seu objetivo é coletar exatamente 2 dados do usuário, UM DE CADA VEZ, nesta ordem:\n"
             "1. Nome completo\n"
-            "2. @ do Instagram\n\n"
+            "2. @ do Instagram DA LOJA/ESTABELECIMENTO (não o pessoal)\n\n"
             "REGRAS IMPORTANTES:\n"
             "- Peça APENAS UM dado por mensagem. Nunca peça dois de uma vez.\n"
-            "- Comece pedindo o nome. Quando receber o nome, agradeça e peça o Instagram.\n"
+            "- Comece pedindo o nome. Quando receber o nome, agradeça e peça o @ do Instagram da loja.\n"
+            "- Ao pedir o Instagram, deixe claro que é o da LOJA/ESTABELECIMENTO: "
+            "'Qual o @ do Instagram da sua loja? Se não tiver, pode me dizer NAO.'\n"
             "- Se o usuário já informou algum dado espontaneamente, absorva-o e peça apenas o próximo da lista.\n"
             "- Se o usuário não tiver Instagram, aceite 'NAO' como valor.\n"
             "- Quando tiver os 2 dados confirmados, chame OBRIGATORIAMENTE a função 'concluir_coleta_dados'.\n"
@@ -163,7 +165,7 @@ MENSAGENS_PADRAO = [
             "Perfeito, {nome}! 🎉\n\n"
             "Agora vamos para o pagamento.\n\n"
             "Como você prefere pagar?\n\n"
-            "1️⃣ Cartão de crédito (assinatura automática)\n"
+            "1️⃣ Cartão de crédito\n"
             "2️⃣ Pix\n\n"
             "Responda *1*, *2*, *CARTÃO* ou *PIX*."
         ),
@@ -256,10 +258,9 @@ MENSAGENS_PADRAO = [
         "categoria": "pagamento",
         "descricao": "Mensagem com link de pagamento por cartão de crédito",
         "texto": (
-            "Aqui está seu link de pagamento em *cartão de crédito*:\n\n"
+            "Aqui está seu link de pagamento por *cartão de crédito*:\n\n"
             "🔗 {link}\n\n"
-            "Esse fluxo ativa a *assinatura mensal automática* do Mindnutri. "
-            "Assim que aprovado, seu acesso é liberado automaticamente! 🎉"
+            "Assim que aprovado, seu acesso é liberado na hora! 🎉"
         ),
         "variaveis": "link",
         "ordem": 50,

@@ -107,44 +107,36 @@ def criar_ou_buscar_cliente(telefone: str, nome: str = None) -> str:
 
 
 def criar_cobranca_assinatura(telefone: str) -> str:
-    """Mantido por compatibilidade: gera assinatura recorrente em cartao."""
-    data = criar_link_assinatura_cartao(telefone)
+    """Mantido por compatibilidade: gera cobrança única em cartão."""
+    data = criar_link_cartao(telefone)
     return data.get("url", "")
 
 
-def criar_link_assinatura_cartao(telefone: str, valor_primeiro_pagamento: float = None) -> dict:
+def criar_link_cartao(telefone: str, valor: float = None) -> dict:
     """
-    Gera um payment link recorrente em cartao.
-    Se valor_primeiro_pagamento for diferente do PLANO_VALOR (cupom), cria link avulso pro primeiro
-    e depois a recorrencia normal é tratada pelo webhook.
+    Gera um payment link de cobrança ÚNICA em cartão (sem recorrência).
+    Quando o plano expirar ou as fichas acabarem, um novo link é gerado.
     """
     assinante = banco.get_assinante(telefone) or {}
     customer_id = criar_ou_buscar_cliente(telefone)
     nome = assinante.get("nome") or f"Assinante {telefone[-4:]}"
-    valor = valor_primeiro_pagamento or config.PLANO_VALOR
+    valor_final = valor or config.PLANO_VALOR
 
-    logger.info("[Asaas] Criando payment link em cartao para %s (customer=%s, valor=%s)", telefone, customer_id, valor)
+    logger.info("[Asaas] Criando payment link cartao (avulso) para %s (customer=%s, valor=%s)", telefone, customer_id, valor_final)
 
     payload = {
         "billingType": "CREDIT_CARD",
-        "chargeType": "RECURRENT",
-        "name": f"Mindnutri Assinatura {telefone[-4:]}",
-        "description": "Mindhub Mindnutri - Assinatura Mensal",
-        "value": valor,
-        "subscriptionCycle": "MONTHLY",
+        "chargeType": "DETACHED",
+        "name": f"Mindnutri Plano Mensal {telefone[-4:]}",
+        "description": f"Mindhub Mindnutri - Plano Mensal (R$ {valor_final:.2f})",
+        "value": valor_final,
         "notificationEnabled": False,
         "externalReference": telefone,
     }
 
-    # Se tem cupom (valor diferente), cria link avulso pro primeiro pagamento
-    if valor_primeiro_pagamento and valor_primeiro_pagamento != config.PLANO_VALOR:
-        payload["chargeType"] = "DETACHED"
-        payload["description"] = f"Mindnutri - 1o mes com cupom (R$ {valor:.2f})"
-        del payload["subscriptionCycle"]
-
     data = _post("paymentLinks", payload)
 
-    logger.info("[Asaas] Payment link recorrente criado: %s -> %s", data.get('id'), data.get('url'))
+    logger.info("[Asaas] Payment link avulso criado: %s -> %s", data.get('id'), data.get('url'))
     return {
         "payment_link_id": data.get("id", ""),
         "url": data.get("url", ""),

@@ -559,8 +559,8 @@ def _pedir_metodo_pagamento(telefone: str, estado_destino: str, abertura: str, d
 
 
 def _iniciar_assinatura(telefone: str, metodo: str, dados_cadastro: dict = None) -> None:
-    """Cria o Assinante no banco (se ainda não existir), gera o link e envia ao cliente."""
-    logger.info("[Asaas] Iniciando assinatura para %s via %s", telefone, metodo)
+    """Cria o Assinante no banco (se ainda não existir), gera o link de cobrança única e envia ao cliente."""
+    logger.info("[Pagamento] Gerando cobranca unica para %s via %s", telefone, metodo)
 
     # Cria o Assinante APENAS agora (na emissão do link de pagamento)
     dados = dados_cadastro or {}
@@ -596,15 +596,15 @@ def _iniciar_assinatura(telefone: str, metodo: str, dados_cadastro: dict = None)
 
     try:
         if metodo == "cartao":
-            from utils.asaas import criar_link_assinatura_cartao
-            pagamento = criar_link_assinatura_cartao(telefone, valor_primeiro_pagamento=valor_primeiro)
+            from utils.asaas import criar_link_cartao
+            pagamento = criar_link_cartao(telefone, valor=valor_primeiro)
             link = pagamento.get("url")
         else:
             from utils.asaas import criar_cobranca_pix
             pagamento = criar_cobranca_pix(
                 telefone,
                 valor_primeiro,
-                f"Mindhub Mindnutri - Assinatura Mensal via Pix{' (cupom ' + cupom_codigo + ')' if cupom_codigo else ''}",
+                f"Mindhub Mindnutri - Plano Mensal via Pix{' (cupom ' + cupom_codigo + ')' if cupom_codigo else ''}",
             )
             link = pagamento.get("invoice_url")
             codigo_pix = pagamento.get("pix_copy_paste", "")
