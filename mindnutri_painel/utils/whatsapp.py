@@ -46,14 +46,15 @@ def _post(endpoint: str, payload: dict, tentativas: int = 1) -> dict:
     return {}
 
 
-def enviar_presenca(telefone: str, presenca: str = "composing") -> None:
+def enviar_presenca(telefone: str, presenca: str = "composing", delay: int = 5000) -> None:
     """
     Envia indicador de presença (digitando...) via Evolution API.
     presenca: 'composing' (digitando), 'recording' (gravando), 'paused' (parou)
+    delay: duração em ms que o status fica visível (default 5s)
     """
-    url = f"{config.EVOLUTION_API_URL}/chat/updatePresence/{INST}"
+    url = f"{config.EVOLUTION_API_URL}/chat/sendPresence/{INST}"
     try:
-        requests.post(url, json={"number": telefone, "presence": presenca},
+        requests.post(url, json={"number": telefone, "presence": presenca, "delay": delay},
                       headers=HEADERS, timeout=5)
     except Exception:
         pass  # Presença é best-effort, não deve quebrar o fluxo

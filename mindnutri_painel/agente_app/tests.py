@@ -18,6 +18,7 @@ from agente_app.nucleo import (
     _montar_ingredientes_operacionais,
     _calcular_custo_total,
     _montar_resumo_calculado,
+    _calcular_subficha_python,
     _processar_midia,
     _interpretar_metodo_pagamento,
 )
@@ -265,6 +266,61 @@ class ResumoCalculadoTest(TestCase):
         dados = {"nome_prato": "Vazio", "ingredientes": []}
         resumo = _montar_resumo_calculado(dados)
         self.assertIn("R$ 0.00", resumo)
+
+
+# ── SUBFICHA CALCULADA POR CÓDIGO ───────────────────────────────
+
+class SubfichaCalculadaTest(TestCase):
+    def test_subficha_custo_por_kg(self):
+        """Massa de empada: 3 ingredientes, rendimento 1.2kg."""
+        dados = {
+            "nome_subficha": "Massa de Empada",
+            "ingredientes": [
+                {"nome": "Farinha", "peso_kg": 0.5, "custo_unit": 8.0},
+                {"nome": "Manteiga", "peso_kg": 0.25, "custo_unit": 40.0},
+                {"nome": "Ovo", "peso_kg": 0.15, "custo_unit": 15.0},
+            ],
+            "rendimento_kg": 1.2,
+        }
+        res = _calcular_subficha_python(dados)
+        # Farinha: 0.5 × 8 = 4.00
+        # Manteiga: 0.25 × 40 = 10.00
+        # Ovo: 0.15 × 15 = 2.25
+        # Total: 16.25 / 1.2 = 13.54
+        self.assertAlmostEqual(res["custo_total"], 16.25)
+        self.assertAlmostEqual(res["custo_por_kg"], 13.54)
+        self.assertIn("Massa de Empada", res["mensagem"])
+
+    def test_subficha_rendimento_zero_usa_fallback(self):
+        """Rendimento zero faz fallback para 1kg (evita divisão por zero)."""
+        dados = {
+            "nome_subficha": "Teste",
+            "ingredientes": [{"nome": "A", "peso_kg": 1, "custo_unit": 10}],
+            "rendimento_kg": 0,
+        }
+        res = _calcular_subficha_python(dados)
+        self.assertAlmostEqual(res["custo_total"], 10.0)
+        self.assertAlmostEqual(res["custo_por_kg"], 10.0)  # fallback rend=1
+
+    def test_subficha_sem_ingredientes(self):
+        dados = {"nome_subficha": "Vazio", "ingredientes": [], "rendimento_kg": 1}
+        res = _calcular_subficha_python(dados)
+        self.assertEqual(res["custo_total"], 0.0)
+        self.assertEqual(res["custo_por_kg"], 0.0)
+
+    def test_subficha_mensagem_formatada(self):
+        """Mensagem deve listar cada ingrediente com cálculo."""
+        dados = {
+            "nome_subficha": "Molho",
+            "ingredientes": [
+                {"nome": "Tomate", "peso_kg": 2.0, "custo_unit": 6.0},
+            ],
+            "rendimento_kg": 1.5,
+        }
+        res = _calcular_subficha_python(dados)
+        self.assertIn("Tomate", res["mensagem"])
+        self.assertIn("R$ 12.00", res["mensagem"])  # 2.0 × 6.0
+        self.assertIn("R$ 8.00", res["mensagem"])    # 12.00 / 1.5
 
 
 # ── PROCESSAMENTO DE MÍDIA ───────────────────────────────────────

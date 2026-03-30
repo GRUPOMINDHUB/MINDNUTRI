@@ -35,6 +35,7 @@ class Assinante(models.Model):
     data_inicio       = models.DateField(default=timezone.localdate)
     proxima_cobranca  = models.DateField(null=True, blank=True)
     asaas_id          = models.CharField(max_length=100, blank=True)
+    payment_link_id   = models.CharField(max_length=100, blank=True, null=True, db_index=True)
 
     # Fichas
     fichas_geradas_mes = models.PositiveIntegerField(default=0)
@@ -136,13 +137,16 @@ class Notificacao(models.Model):
 
 class Conversa(models.Model):
     assinante = models.ForeignKey(Assinante, on_delete=models.CASCADE, related_name='conversas', null=True, blank=True)
-    telefone = models.CharField(max_length=30)
+    telefone = models.CharField(max_length=30, db_index=True)
     role = models.CharField(max_length=50)
     content = models.TextField()
     criado_em = models.DateTimeField(auto_now_add=True)
 
     class Meta:
         ordering = ['-criado_em']
+        indexes = [
+            models.Index(fields=['telefone', '-criado_em'], name='idx_conversa_tel_data'),
+        ]
 
     def __str__(self):
         return f"{self.telefone} ({self.role})"
@@ -200,7 +204,7 @@ class ConfiguracaoIA(models.Model):
     )
 
     # Parâmetros do modelo
-    modelo_ia = models.CharField(max_length=50, default='gpt-4o')
+    modelo_ia = models.CharField(max_length=50, default='gpt-4.1-mini')
     max_tokens = models.IntegerField(default=3000)
     temperatura = models.FloatField(default=0.7)
 
@@ -265,9 +269,10 @@ class Cupom(models.Model):
             return None
 
     def usar(self):
-        """Incrementa contador de usos."""
-        self.usos += 1
-        self.save(update_fields=['usos'])
+        """Incrementa contador de usos atomicamente via F()."""
+        from django.db.models import F
+        Cupom.objects.filter(pk=self.pk).update(usos=F('usos') + 1)
+        self.refresh_from_db(fields=['usos'])
 
 
 class PerdaIngrediente(models.Model):

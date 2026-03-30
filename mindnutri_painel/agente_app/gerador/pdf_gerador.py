@@ -122,7 +122,7 @@ def gerar_ficha_pdf(dados: dict, caminho_saida: str, foto_path: str = None) -> s
     c.drawCentredString(
         W/2,
         H - 22*mm,
-        f"{dados.get('classificacao','')}  |  {dados.get('codigo','')}  |  {dados.get('estabelecimento','')}",
+        f"{dados.get('codigo','')}  |  {dados.get('estabelecimento','')}" if dados.get('codigo') or dados.get('estabelecimento') else "",
     )
 
     # Faixa vermelha
@@ -176,7 +176,7 @@ def gerar_ficha_pdf(dados: dict, caminho_saida: str, foto_path: str = None) -> s
     c.drawCentredString(x_foto+col_foto_w/2, fy-10*mm, nome_prato_display)
     c.setFont(font_regular, 8)
     c.setFillColor(CINZA)
-    c.drawCentredString(x_foto+col_foto_w/2, fy-15*mm, dados.get("classificacao",""))
+    # classificação removida — não exibir no PDF
 
     # ── COLUNA 2: INGREDIENTES ──
     _roundrect(c, x_ing, content_bot, col_ing_w, content_h,

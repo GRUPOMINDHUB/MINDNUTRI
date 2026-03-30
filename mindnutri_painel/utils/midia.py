@@ -13,9 +13,10 @@ logger = logging.getLogger(__name__)
 
 def transcrever_audio(audio_bytes: bytes, extensao: str = "ogg") -> str | None:
     """Transcreve áudio para texto usando Whisper."""
+    tmp_path = None
     try:
         from openai import OpenAI
-        client = OpenAI(api_key=config.OPENAI_API_KEY)
+        client = OpenAI(api_key=config.OPENAI_API_KEY, timeout=30.0)
 
         with tempfile.NamedTemporaryFile(suffix=f".{extensao}", delete=False) as f:
             f.write(audio_bytes)
@@ -27,11 +28,13 @@ def transcrever_audio(audio_bytes: bytes, extensao: str = "ogg") -> str | None:
                 file=f,
                 language="pt",
             )
-        os.unlink(tmp_path)
         return resultado.text.strip()
     except Exception as e:
         logger.error("[Whisper] Erro na transcricao: %s", e)
         return None
+    finally:
+        if tmp_path and os.path.exists(tmp_path):
+            os.unlink(tmp_path)
 
 
 # ── ANÁLISE DE IMAGEM (Claude Vision) ────────────────────────────
@@ -39,7 +42,10 @@ def transcrever_audio(audio_bytes: bytes, extensao: str = "ogg") -> str | None:
 def analisar_imagem(imagem_bytes: bytes, prompt: str) -> str:
     """Envia imagem para o Claude analisar (extração de ingredientes)."""
     try:
-        client = anthropic.Anthropic(api_key=config.ANTHROPIC_API_KEY)
+        client = anthropic.Anthropic(
+            api_key=config.ANTHROPIC_API_KEY,
+            timeout=30.0,
+        )
         b64 = base64.standard_b64encode(imagem_bytes).decode("utf-8")
 
         msg = client.messages.create(

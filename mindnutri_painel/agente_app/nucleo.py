@@ -22,8 +22,55 @@ _gpt = openai.OpenAI(api_key=config.OPENAI_API_KEY)
 
 EXEMPLOS_DIR: Path = Path(__file__).parent.parent / "exemplos"
 
-_falhas: dict[str, int] = {}
 
+class _FalhasComTTL:
+    """Contador de falhas com expiração automática (evita memory leak)."""
+    def __init__(self, ttl: int = 3600):
+        self._data: dict[str, tuple[int, float]] = {}
+        self._ttl = ttl
+
+    def get(self, key: str, default: int = 0) -> int:
+        import time
+        entry = self._data.get(key)
+        if entry and time.monotonic() - entry[1] < self._ttl:
+            return entry[0]
+        return default
+
+    def set(self, key: str, value: int) -> None:
+        import time
+        self._data[key] = (value, time.monotonic())
+
+    def delete(self, key: str) -> None:
+        self._data.pop(key, None)
+
+
+_falhas = _FalhasComTTL(ttl=3600)
+
+
+def _chamar_openai_com_retry(mensagens, tools, modelo, max_tentativas=3):
+    """Chama OpenAI com retry e backoff exponencial para erros transientes."""
+    import time as _time
+    for tentativa in range(max_tentativas):
+        try:
+            return _gpt.chat.completions.create(
+                model=modelo,
+                messages=mensagens,
+                tools=tools,
+                timeout=60,
+            )
+        except openai.RateLimitError:
+            espera = 2 ** tentativa
+            logger.warning("[OpenAI] Rate limit, aguardando %ds (tentativa %d/%d)",
+                           espera, tentativa + 1, max_tentativas)
+            _time.sleep(espera)
+        except openai.APITimeoutError:
+            logger.warning("[OpenAI] Timeout (tentativa %d/%d)", tentativa + 1, max_tentativas)
+            if tentativa == max_tentativas - 1:
+                raise
+        except openai.APIConnectionError:
+            logger.warning("[OpenAI] Conexão falhou (tentativa %d/%d)", tentativa + 1, max_tentativas)
+            _time.sleep(1)
+    raise openai.APIError("Máximo de tentativas OpenAI atingido")
 
 
 # ── HELPERS DE DETECÇÃO ───────────────────────────────────────────────────────
@@ -37,6 +84,17 @@ _FRASES_ZERO = (
 def _quer_comecar_do_zero(texto: str) -> bool:
     t = (texto or "").lower().strip()
     return any(f in t for f in _FRASES_ZERO)
+
+
+_SAUDACOES = (
+    "oi", "olá", "ola", "eae", "eai", "e ai", "e aí",
+    "bom dia", "boa tarde", "boa noite", "hello", "hi",
+    "fala", "salve", "opa", "hey",
+)
+
+def _eh_saudacao(texto: str) -> bool:
+    t = (texto or "").lower().strip()
+    return t in _SAUDACOES or any(t.startswith(s + " ") or t.startswith(s + "!") or t.startswith(s + ",") for s in _SAUDACOES)
 
 
 def _iniciar_boas_vindas(telefone: str) -> None:
@@ -112,6 +170,16 @@ def processar_mensagem(telefone: str, tipo: str, texto: str | None = None,
 
     estado = banco.get_estado(telefone)
     estado_atual = estado.get("estado", "")
+
+    # ── Expirar estados inativos (>2h) para evitar limbo ────────────
+    if estado_atual not in ("inicio", "aguardando_pagamento", ""):
+        minutos_inativo = banco.get_tempo_inativo_minutos(telefone)
+        if minutos_inativo > 120:
+            logger.info("[Estado] Expirando estado antigo para %s: %s (%d min inativo)",
+                        telefone, estado_atual, minutos_inativo)
+            banco.resetar_estado(telefone)
+            estado = {"estado": "inicio", "dados": {}}
+            estado_atual = "inicio"
 
     # ── Processar mídia ──────────────────────────────────────────────
     if tipo != "texto" or (tipo == "imagem" and estado_atual in ("coletando_foto_preparo", "aguardando_foto_operacional")):
@@ -283,6 +351,12 @@ def _fluxo_assinante_ativo(telefone: str, texto: str, texto_lower: str,
         _fluxo_coletando_foto_preparo(telefone, texto, estado, assinante)
         return
 
+    # Saudação ou estado vazio/inicio → menu principal (não delega pro LLM)
+    if est in ("inicio", "") or _eh_saudacao(texto_lower):
+        banco.set_estado(telefone, "criando_ficha", {})
+        _enviar_menu_principal(telefone, assinante)
+        return
+
     _conversar_com_ia(telefone, texto, assinante)
 
 # ── FLUXO PRÉ-ASSINATURA ─────────────────────────────────────────────────────
@@ -428,6 +502,8 @@ def _conversar_coleta_dados(telefone: str, texto: str, estado: dict) -> None:
     Usa LLM para coletar Nome e Instagram de forma conversacional.
     Quando todos os dados estiverem confirmados, avança para pagamento.
     """
+    whatsapp.enviar_presenca(telefone, "composing")
+
     prompt_coleta = _msg("prompt_coleta")
 
     historico = banco.get_historico(telefone, limite=10)
@@ -452,13 +528,8 @@ def _conversar_coleta_dados(telefone: str, texto: str, estado: dict) -> None:
     }]
 
     try:
-        modelo = getattr(config, "OPENAI_MODEL", "gpt-4o")
-        resposta = _gpt.chat.completions.create(
-            model=modelo,
-            messages=mensagens,
-            tools=tools,
-            timeout=60,
-        )
+        modelo = getattr(config, "OPENAI_MODEL", "gpt-4.1-mini")
+        resposta = _chamar_openai_com_retry(mensagens, tools, modelo)
         message = resposta.choices[0].message
 
         if message.content and message.content.strip():
@@ -580,22 +651,26 @@ def _iniciar_assinatura(telefone: str, metodo: str, dados_cadastro: dict = None)
 
     # Cria o Assinante APENAS agora (na emissão do link de pagamento)
     dados = dados_cadastro or {}
-    if not banco.get_assinante(telefone):
-        from painel.models import Assinante
-        Assinante.objects.get_or_create(
-            telefone=telefone,
-            defaults={
-                "nome":      dados.get("nome", ""),
-                "instagram": dados.get("instagram", ""),
-                "status":    "pendente",
-            }
-        )
-    else:
-        if dados:
-            banco.atualizar_assinante(telefone,
-                nome=dados.get("nome", ""),
-                instagram=dados.get("instagram", ""),
-            )
+    from painel.models import Assinante
+    assinante_obj, criado = Assinante.objects.get_or_create(
+        telefone=telefone,
+        defaults={
+            "nome":      dados.get("nome", ""),
+            "instagram": dados.get("instagram", ""),
+            "status":    "pendente",
+        }
+    )
+    # Sempre atualiza nome/instagram (corrige caso get_or_create tenha
+    # encontrado assinante existente sem esses dados)
+    nome_novo = dados.get("nome", "")
+    insta_novo = dados.get("instagram", "")
+    if nome_novo and not assinante_obj.nome:
+        assinante_obj.nome = nome_novo
+    if insta_novo and not assinante_obj.instagram:
+        assinante_obj.instagram = insta_novo
+    if not criado and (nome_novo or insta_novo):
+        assinante_obj.save()
+        logger.info("[Pagamento] Assinante %s atualizado: nome=%s instagram=%s", telefone, assinante_obj.nome, assinante_obj.instagram)
 
     # Verificar se há cupom aplicado
     cupom_codigo = dados.get("cupom_codigo")
@@ -1058,6 +1133,9 @@ def _conversar_com_ia(telefone: str, texto: str, assinante: dict) -> None:
     Envia mensagem para a IA com todo o contexto e retorna resposta.
     Detecta quando a IA quer gerar um arquivo.
     """
+    # Indica "digitando..." enquanto a IA processa
+    whatsapp.enviar_presenca(telefone, "composing")
+
     # Salva mensagem do usuÃ¡rio
     banco.salvar_mensagem(telefone, "user", texto)
 
@@ -1144,6 +1222,33 @@ BASE DE PERDAS PADRAO (use como referencia ao perguntar sobre perdas):
             {
                 "type": "function",
                 "function": {
+                    "name": "calcular_subficha",
+                    "description": "Calcula o custo por kg de um pre-preparo (subficha). Passe os ingredientes com custo_unit em R$/kg e peso em kg, e o rendimento total em kg. O sistema calcula e retorna o custo/kg correto. SEMPRE use esta function para calculos de subficha — NUNCA faca a conta voce mesmo.",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "nome_subficha": {"type": "string", "description": "Nome do pre-preparo (ex: Massa de Empada)"},
+                            "ingredientes": {
+                                "type": "array",
+                                "items": {
+                                    "type": "object",
+                                    "properties": {
+                                        "nome":       {"type": "string"},
+                                        "peso_kg":    {"type": "number", "description": "Quantidade usada em KG"},
+                                        "custo_unit": {"type": "number", "description": "Preco por KG (R$/kg)"},
+                                    },
+                                    "required": ["nome", "peso_kg", "custo_unit"]
+                                }
+                            },
+                            "rendimento_kg": {"type": "number", "description": "Quanto a receita rende em KG"},
+                        },
+                        "required": ["nome_subficha", "ingredientes", "rendimento_kg"]
+                    }
+                }
+            },
+            {
+                "type": "function",
+                "function": {
                     "name": "salvar_ingredientes",
                     "description": "Salva ingredientes na base do cliente apÃ³s coletar nome, unidade, custo, FC e IC.",
                     "parameters": {
@@ -1171,14 +1276,9 @@ BASE DE PERDAS PADRAO (use como referencia ao perguntar sobre perdas):
         ]
 
         # ConfiguraÃ§Ã£o do modelo caso nÃ£o tenha sido migrada
-        modelo_escolhido = _cfg.modelo_ia or getattr(config, 'OPENAI_MODEL', 'gpt-4o')
+        modelo_escolhido = _cfg.modelo_ia or getattr(config, 'OPENAI_MODEL', 'gpt-4.1-mini')
 
-        resposta = _gpt.chat.completions.create(
-            model=modelo_escolhido,
-            messages=mensagens_openai,
-            tools=tools,
-            timeout=60,
-        )
+        resposta = _chamar_openai_com_retry(mensagens_openai, tools, modelo_escolhido)
 
         message = resposta.choices[0].message
 
@@ -1187,7 +1287,7 @@ BASE DE PERDAS PADRAO (use como referencia ao perguntar sobre perdas):
         tool_calls = message.tool_calls
 
         # Reseta contador de falhas
-        _falhas[telefone] = 0
+        _falhas.delete(telefone)
 
         # Processa tool use
         if tool_calls:
@@ -1217,6 +1317,14 @@ BASE DE PERDAS PADRAO (use como referencia ao perguntar sobre perdas):
                     logger.warning("[Agente] IA chamou gerar_ficha_operacional diretamente — ignorando. O fluxo correto é via gerar_ficha_tecnica → estado aguardando_decisao_ficha_operacional.")
                     continue
 
+                elif tool_name == "calcular_subficha":
+                    resultado = _calcular_subficha_python(tool_input)
+                    # Envia resultado ao usuário e salva no histórico
+                    whatsapp.enviar_texto(telefone, resultado["mensagem"])
+                    banco.salvar_mensagem(telefone, "assistant", resultado["mensagem"])
+                    texto_enviado = True
+                    continue
+
                 elif tool_name == "salvar_ingredientes":
                     for ing in tool_input.get("ingredientes", []):
                         banco.salvar_ingrediente(
@@ -1232,7 +1340,7 @@ BASE DE PERDAS PADRAO (use como referencia ao perguntar sobre perdas):
                         texto_enviado = True
                     if not texto_resposta:
                         banco.salvar_mensagem(telefone, "assistant", "[Ingredientes salvos na base do cliente]")
-                
+
             return
 
         # Resposta de texto normal (sem tools)
@@ -1386,6 +1494,42 @@ def _salvar_ingredientes_da_ficha(telefone: str, dados: dict) -> None:
         logger.info("[Banco] Ingredientes atualizados: %s item(ns)", len(ingredientes))
 
 
+def _calcular_subficha_python(dados: dict) -> dict:
+    """
+    Calcula custo por kg de um pré-preparo (subficha).
+    Toda a aritmética é feita em Python — o LLM NUNCA faz contas.
+    """
+    nome = dados.get("nome_subficha", "Pré-preparo")
+    ingredientes = dados.get("ingredientes", [])
+    rendimento_kg = float(dados.get("rendimento_kg", 1) or 1)
+
+    linhas = [f"Subficha: {nome}", ""]
+    custo_total = 0.0
+
+    for idx, ing in enumerate(ingredientes, 1):
+        nome_ing = ing.get("nome", "?")
+        peso = float(ing.get("peso_kg", 0) or 0)
+        cu = float(ing.get("custo_unit", 0) or 0)
+        custo_ing = round(cu * peso, 2)
+        custo_total += custo_ing
+        linhas.append(f"{idx}. {nome_ing}: {peso:.3f}kg x R$ {cu:.2f}/kg = R$ {custo_ing:.2f}")
+
+    custo_total = round(custo_total, 2)
+    custo_por_kg = round(custo_total / rendimento_kg, 2) if rendimento_kg > 0 else 0
+
+    linhas.append("")
+    linhas.append(f"Custo total da receita: R$ {custo_total:.2f}")
+    linhas.append(f"Rendimento: {rendimento_kg:.2f}kg")
+    linhas.append(f"Custo por kg: R$ {custo_por_kg:.2f}")
+
+    return {
+        "custo_total": custo_total,
+        "custo_por_kg": custo_por_kg,
+        "rendimento_kg": rendimento_kg,
+        "mensagem": "\n".join(linhas),
+    }
+
+
 def _calcular_custo_total(dados: dict) -> float:
     """Custo total = soma de (custo_unit × peso_bruto) de cada ingrediente.
     peso_bruto = peso_liquido × FC (o que efetivamente se compra)."""
@@ -1404,15 +1548,15 @@ def _calcular_custo_total(dados: dict) -> float:
 # â”€â”€ FALHAS E ALERTAS â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 def _registrar_falha(telefone: str, assinante: dict) -> None:
-    _falhas[telefone] = _falhas.get(telefone, 0) + 1
-    qtd = _falhas[telefone]
+    qtd = _falhas.get(telefone, 0) + 1
+    _falhas.set(telefone, qtd)
 
     if qtd == 1:
         whatsapp.enviar_texto(telefone, _msg("falha_entender_1"))
     elif qtd == 2:
         whatsapp.enviar_texto(telefone, _msg("falha_entender_2"))
     elif qtd >= 3:
-        _falhas[telefone] = 0
+        _falhas.delete(telefone)
         whatsapp.enviar_texto(telefone, _msg("falha_entender_3"))
         # Alerta para o gestor
         nome = assinante.get("nome", telefone)

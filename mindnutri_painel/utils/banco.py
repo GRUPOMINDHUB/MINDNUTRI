@@ -2,6 +2,8 @@ import json
 import logging
 from datetime import timedelta
 
+from django.db import transaction
+from django.db.models import F
 from django.utils import timezone
 
 from painel.models import Assinante, Conversa, EstadoConversa, FichaTecnica, Ingrediente, Notificacao
@@ -55,14 +57,18 @@ def atualizar_assinante(telefone: str, **campos) -> None:
     except Assinante.DoesNotExist:
         pass
 
-def incrementar_ficha(telefone: str) -> None:
-    try:
-        a = Assinante.objects.get(telefone=telefone)
-        a.fichas_geradas_mes += 1
-        a.total_fichas_geradas += 1
-        a.save()
-    except Assinante.DoesNotExist:
-        pass
+def incrementar_ficha(telefone: str) -> bool:
+    """Incrementa fichas atomicamente via F(). Retorna False se limite atingido."""
+    atualizado = Assinante.objects.filter(
+        telefone=telefone,
+        fichas_geradas_mes__lt=F('fichas_limite_mes'),
+    ).update(
+        fichas_geradas_mes=F('fichas_geradas_mes') + 1,
+        total_fichas_geradas=F('total_fichas_geradas') + 1,
+    )
+    if atualizado == 0:
+        logger.warning("[Credito] Limite atingido ou assinante inexistente: %s", telefone)
+    return atualizado > 0
 
 
 def possui_ficha_no_mes(telefone: str, nome_prato: str, tipo: str | None = None) -> bool:
@@ -99,13 +105,13 @@ def salvar_mensagem(telefone: str, role: str, content: str) -> None:
 def get_historico(telefone: str, limite: int = 20) -> list[dict]:
     # Returns last N messages in chronological order (created older first)
     messages = Conversa.objects.filter(telefone=telefone).order_by('-criado_em')[:limite]
-    
+
     historico = []
     for m in reversed(messages):
         # Ignore empty messages to prevent OpenAI API from throwing errors or hallucinating
         if m.content and m.content.strip():
             historico.append({"role": m.role, "content": m.content})
-            
+
     return historico
 
 def _limpar_historico_antigo(telefone: str) -> None:
@@ -136,10 +142,13 @@ def get_estado(telefone: str) -> dict:
 
 def set_estado(telefone: str, estado: str, dados: dict | None = None) -> None:
     dados_str = json.dumps(dados or {}, ensure_ascii=False)
-    obj, created = EstadoConversa.objects.get_or_create(telefone=telefone)
-    obj.estado = estado
-    obj.dados_temp = dados_str
-    obj.save()
+    with transaction.atomic():
+        obj, created = EstadoConversa.objects.select_for_update().get_or_create(
+            telefone=telefone
+        )
+        obj.estado = estado
+        obj.dados_temp = dados_str
+        obj.save()
 
 def resetar_estado(telefone: str) -> None:
     set_estado(telefone, "inicio", {})
@@ -199,7 +208,7 @@ def criar_notificacao(tipo: str, nivel: str, titulo: str,
     assinante = None
     if telefone:
         assinante = Assinante.objects.filter(telefone=telefone).first()
-        
+
     Notificacao.objects.create(
         tipo=tipo,
         nivel=nivel,

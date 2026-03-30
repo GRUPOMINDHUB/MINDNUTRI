@@ -5,6 +5,7 @@ import re
 import requests
 
 from django.conf import settings as config
+from django.db import transaction
 
 from utils import banco
 
@@ -57,13 +58,16 @@ def criar_ou_buscar_cliente(telefone: str, nome: str = None) -> str:
     """Retorna o customer_id do Asaas, criando o cliente se necessario."""
     assinante = banco.get_assinante(telefone) or {}
     customer_id = assinante.get("asaas_customer_id")
-    cpf_cliente = assinante.get("cpf") or "24971563792"
+    cpf_cliente = assinante.get("cpf") or ""
+
+    if not cpf_cliente:
+        logger.warning("[Asaas] Assinante %s sem CPF — usando telefone como identificador", telefone)
 
     if customer_id:
         try:
             customer_data = _get(f"customers/{customer_id}")
-            if not customer_data.get("cpfCnpj"):
-                logger.info("[Asaas] Customer %s sem CPF. Atualizando com %s...", customer_id, cpf_cliente)
+            if cpf_cliente and not customer_data.get("cpfCnpj"):
+                logger.info("[Asaas] Customer %s sem CPF. Atualizando...", customer_id)
                 _update(f"customers/{customer_id}", {"cpfCnpj": cpf_cliente})
             logger.info("[Asaas] Customer ID existente e valido: %s", customer_id)
             return customer_id
@@ -73,16 +77,16 @@ def criar_ou_buscar_cliente(telefone: str, nome: str = None) -> str:
     nome_cliente = nome or assinante.get("nome") or f"Assinante {telefone[-4:]}"
     fone_limpo = _formatar_telefone(telefone)
 
+    payload_cliente = {
+        "name": nome_cliente,
+        "mobilePhone": fone_limpo,
+        "notificationDisabled": False,
+    }
+    if cpf_cliente:
+        payload_cliente["cpfCnpj"] = cpf_cliente
+
     try:
-        data = _post(
-            "customers",
-            {
-                "name": nome_cliente,
-                "mobilePhone": fone_limpo,
-                "cpfCnpj": cpf_cliente,
-                "notificationDisabled": False,
-            },
-        )
+        data = _post("customers", payload_cliente)
         customer_id = data["id"]
         banco.atualizar_assinante(telefone, asaas_customer_id=customer_id)
         logger.info("[Asaas] Cliente criado com sucesso: %s", customer_id)
@@ -92,7 +96,7 @@ def criar_ou_buscar_cliente(telefone: str, nome: str = None) -> str:
         resp_text = e.response.text if hasattr(e, "response") and e.response is not None else str(e)
         logger.error("[Asaas] Erro ao criar cliente: %s", resp_text)
 
-        if e.response is not None and e.response.status_code == 400:
+        if cpf_cliente and e.response is not None and e.response.status_code == 400:
             try:
                 customers = _get(f"customers?cpfCnpj={cpf_cliente}")
                 if customers.get("data"):
@@ -214,15 +218,24 @@ def criar_cobranca_avulsa(telefone: str, valor: float, descricao: str) -> str:
 
 def processar_webhook_asaas(evento: str, payment_data: dict) -> None:
     """
-    Processa webhooks do Asaas com idempotência.
-    Cada payment_id + evento é processado no máximo uma vez.
+    Processa webhooks do Asaas com idempotência ATÔMICA.
+    Registra ANTES de processar — se já existe, ignora.
     """
     from painel.models import WebhookProcessado
 
-    # Idempotência: monta chave única (payment_id + evento)
     payment_id = payment_data.get("id", "")
     evento_id = f"{evento}:{payment_id}" if payment_id else ""
-    if evento_id and WebhookProcessado.ja_processado(evento_id):
+
+    if not evento_id:
+        logger.warning("[Asaas] Webhook sem payment_id ignorado: %s", evento)
+        return
+
+    # Idempotência atômica: get_or_create usa INSERT ON CONFLICT (unique)
+    _, created = WebhookProcessado.objects.get_or_create(
+        evento_id=evento_id,
+        defaults={"evento_tipo": evento},
+    )
+    if not created:
         logger.info("[Asaas] Webhook duplicado ignorado: %s", evento_id)
         return
 
@@ -237,68 +250,65 @@ def processar_webhook_asaas(evento: str, payment_data: dict) -> None:
         return
 
     telefone = assinante["telefone"]
-    if customer_id and assinante.get("asaas_customer_id") != customer_id:
-        banco.atualizar_assinante(telefone, asaas_customer_id=customer_id)
 
-    if evento in ("PAYMENT_CONFIRMED", "PAYMENT_RECEIVED"):
-        from datetime import date, timedelta
+    with transaction.atomic():
+        if customer_id and assinante.get("asaas_customer_id") != customer_id:
+            banco.atualizar_assinante(telefone, asaas_customer_id=customer_id)
 
-        era_primeiro_pagamento = assinante.get("status") in ("pendente", "bloqueado", "inadimplente")
-        banco.atualizar_assinante(
-            telefone,
-            status="ativo",
-            data_inicio=assinante.get("data_inicio") or date.today().isoformat(),
-            proxima_cobranca=(date.today() + timedelta(days=30)).isoformat(),
-            fichas_geradas_mes=0,
-        )
+        if evento in ("PAYMENT_CONFIRMED", "PAYMENT_RECEIVED"):
+            _processar_pagamento_confirmado(telefone, assinante)
 
-        if era_primeiro_pagamento:
+        elif evento == "PAYMENT_OVERDUE":
+            banco.atualizar_assinante(telefone, status="inadimplente")
             banco.criar_notificacao(
-                "novo_assinante",
-                "info",
-                "Pagamento confirmado",
-                f"{assinante.get('nome', telefone)} - pagamento confirmado. Acesso ativado.",
-                telefone,
-            )
-            _boas_vindas_pos_pagamento(telefone)
-        else:
-            banco.criar_notificacao(
-                "novo_assinante",
-                "info",
-                "Assinatura renovada",
-                f"{assinante.get('nome', telefone)} - pagamento recebido. Ciclo renovado.",
+                "inadimplencia",
+                "critico",
+                "Pagamento em atraso",
+                f"{assinante.get('nome', telefone)} - pagamento em atraso.",
                 telefone,
             )
             from utils.whatsapp import enviar_texto
+            enviar_texto(telefone, _msg("webhook_pagamento_atraso"))
 
-            enviar_texto(telefone, _msg("webhook_pagamento_renovado"))
+        elif evento in ("SUBSCRIPTION_INACTIVATED", "PAYMENT_DELETED"):
+            banco.atualizar_assinante(telefone, status="cancelado")
+            banco.criar_notificacao(
+                "cancelamento",
+                "aviso",
+                "Assinatura cancelada",
+                f"{assinante.get('nome', telefone)} - assinatura cancelada.",
+                telefone,
+            )
 
-    elif evento == "PAYMENT_OVERDUE":
-        banco.atualizar_assinante(telefone, status="inadimplente")
+
+def _processar_pagamento_confirmado(telefone: str, assinante: dict) -> None:
+    """Ativa assinante após pagamento confirmado."""
+    from datetime import date, timedelta
+
+    era_primeiro = assinante.get("status") in ("pendente", "bloqueado", "inadimplente")
+    banco.atualizar_assinante(
+        telefone,
+        status="ativo",
+        data_inicio=assinante.get("data_inicio") or date.today().isoformat(),
+        proxima_cobranca=(date.today() + timedelta(days=30)).isoformat(),
+        fichas_geradas_mes=0,
+    )
+
+    if era_primeiro:
         banco.criar_notificacao(
-            "inadimplencia",
-            "critico",
-            "Pagamento em atraso",
-            f"{assinante.get('nome', telefone)} - pagamento em atraso. Acesso bloqueado.",
+            "novo_assinante", "info", "Pagamento confirmado",
+            f"{assinante.get('nome', telefone)} - pagamento confirmado. Acesso ativado.",
+            telefone,
+        )
+        _boas_vindas_pos_pagamento(telefone)
+    else:
+        banco.criar_notificacao(
+            "novo_assinante", "info", "Assinatura renovada",
+            f"{assinante.get('nome', telefone)} - pagamento recebido. Ciclo renovado.",
             telefone,
         )
         from utils.whatsapp import enviar_texto
-
-        enviar_texto(telefone, _msg("webhook_pagamento_atraso"))
-
-    elif evento in ("SUBSCRIPTION_INACTIVATED", "PAYMENT_DELETED"):
-        banco.atualizar_assinante(telefone, status="cancelado")
-        banco.criar_notificacao(
-            "cancelamento",
-            "aviso",
-            "Assinatura cancelada",
-            f"{assinante.get('nome', telefone)} - assinatura cancelada.",
-            telefone,
-        )
-
-    # Registra evento como processado (idempotência)
-    if evento_id:
-        WebhookProcessado.registrar(evento_id, evento)
+        enviar_texto(telefone, _msg("webhook_pagamento_renovado"))
 
 
 def _buscar_por_customer_id(customer_id: str) -> dict | None:
@@ -316,18 +326,25 @@ def _buscar_por_customer_id(customer_id: str) -> dict | None:
 
 
 def _buscar_por_payment_link_id(payment_link_id: str) -> dict | None:
-    """Busca assinante pelo paymentLink salvo no estado da conversa."""
+    """Busca assinante pelo payment_link_id indexado no modelo."""
     if not payment_link_id:
         return None
 
-    from painel.models import EstadoConversa
+    from painel.models import Assinante
 
+    try:
+        a = Assinante.objects.get(payment_link_id=payment_link_id)
+        return banco.get_assinante(a.telefone)
+    except Assinante.DoesNotExist:
+        pass
+
+    # Fallback: busca no estado da conversa (legado)
+    from painel.models import EstadoConversa
     for estado in EstadoConversa.objects.all():
         try:
             dados = json.loads(estado.dados_temp or "{}")
         except json.JSONDecodeError:
             continue
-
         if dados.get("payment_link_id") == payment_link_id:
             return banco.get_assinante(estado.telefone)
 
@@ -345,4 +362,3 @@ def _boas_vindas_pos_pagamento(telefone: str) -> None:
 
     resetar_estado(telefone)
     enviar_texto(telefone, _msg("webhook_boas_vindas", nome=nome, fichas_rest=fichas_rest))
-

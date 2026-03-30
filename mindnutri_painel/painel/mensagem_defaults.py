@@ -101,13 +101,9 @@ MENSAGENS_PADRAO = [
         "categoria": "menu",
         "descricao": "Menu principal para assinante ativo com opções e fichas restantes",
         "texto": (
-            "Olá, {nome}! 😊 Como posso te ajudar hoje?\n\n"
-            "📋 *1* — Criar ficha técnica (XLSX)\n"
-            "📄 *2* — Criar ficha operacional (PDF)\n"
-            "💰 *3* — Calcular custo rápido de um prato\n"
-            "📦 *4* — Ver meus ingredientes cadastrados\n\n"
-            "Fichas disponíveis este mês: *{fichas_rest}/30*\n\n"
-            "Responda com o número ou descreva o que precisa!"
+            "Ola, {nome}! Vamos montar fichas tecnicas juntos? 🍽️\n\n"
+            "Voce tem {fichas_rest} fichas disponiveis este mes.\n\n"
+            "Me diz o nome do prato que quer calcular e ja comecamos!"
         ),
         "variaveis": "nome,fichas_rest",
         "ordem": 10,
