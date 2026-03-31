@@ -56,6 +56,8 @@ def _chamar_openai_com_retry(mensagens, tools, modelo, max_tentativas=3):
                 model=modelo,
                 messages=mensagens,
                 tools=tools,
+                max_tokens=2000,
+                temperature=0.4,
                 timeout=60,
             )
         except openai.RateLimitError:
@@ -95,6 +97,90 @@ _SAUDACOES = (
 def _eh_saudacao(texto: str) -> bool:
     t = (texto or "").lower().strip()
     return t in _SAUDACOES or any(t.startswith(s + " ") or t.startswith(s + "!") or t.startswith(s + ",") for s in _SAUDACOES)
+
+
+# ── DETECÇÃO DE INGREDIENTES MANIPULADOS (no código, não no LLM) ─────────────
+
+_PALAVRAS_MANIPULADO = [
+    "desfiado", "desfiada", "moido", "moida", "moído", "moída",
+    "cozido", "cozida", "assado", "assada",
+    "caramelizado", "caramelizada", "temperado", "temperada",
+    "frito", "frita", "refogado", "refogada",
+    "confitado", "confitada", "crocante",
+    "gratinado", "gratinada", "empanado", "empanada",
+    "pure", "purê", "ragu", "ragú", "ragú",
+    "tropeiro", "risoto", "molho",
+    "creme", "ganache", "brigadeiro", "farofa",
+    "caldo", "blend", "chimichurri", "pesto",
+    "bechamel", "béchamel", "vinagrete", "guacamole",
+    "homus", "hummus", "pate", "patê",
+    "massa fresca", "nhoque", "gnocchi",
+]
+
+# Palavras que indicam produto industrializado (NÃO manipulado mesmo com "molho"/"creme")
+_EXCECOES_INDUSTRIALIZADO = [
+    "molho de tomate", "extrato de tomate", "creme de leite",
+    "leite condensado", "molho ingles", "molho inglês",
+    "molho shoyu", "molho de soja", "molho barbecue",
+    "cream cheese", "requeijao", "requeijão",
+    "caldo knorr", "caldo maggi", "caldo em cubo", "caldo em po",
+]
+
+
+def _normalizar(texto: str) -> str:
+    """Remove acentos e converte para minúsculo."""
+    nfkd = unicodedata.normalize('NFKD', texto.lower())
+    return ''.join(c for c in nfkd if not unicodedata.combining(c))
+
+
+def _detectar_manipulados(texto_usuario: str) -> list[str]:
+    """
+    Analisa texto do usuário e retorna lista de ingredientes que parecem manipulados.
+    Ex: "300g de frango desfiado, 200g de arroz, 100g de purê de batata"
+    → ["frango desfiado", "purê de batata"]
+    """
+    texto_lower = texto_usuario.lower().strip()
+    texto_norm = _normalizar(texto_usuario)
+
+    # Primeiro checa se é uma lista de ingredientes (tem números/unidades)
+    tem_ingredientes = bool(re.search(r'\d+\s*(g|kg|ml|l|xicara|colher|unidade)', texto_norm))
+    if not tem_ingredientes:
+        return []
+
+    # Checa exceções industrializadas primeiro
+    for exc in _EXCECOES_INDUSTRIALIZADO:
+        exc_norm = _normalizar(exc)
+        if exc_norm in texto_norm:
+            # Remove do texto normalizado pra não pegar "molho" de "molho de tomate"
+            texto_norm = texto_norm.replace(exc_norm, "")
+            texto_lower = texto_lower.replace(exc.lower(), "")
+
+    # Agora procura palavras de manipulação
+    manipulados = []
+    for palavra in _PALAVRAS_MANIPULADO:
+        palavra_norm = _normalizar(palavra)
+        if palavra_norm in texto_norm:
+            # Tenta extrair o nome do ingrediente completo ao redor da palavra
+            # Procura padrão: "Xg de [ingrediente com palavra]" ou "[ingrediente com palavra]"
+            patterns = [
+                # "300g de frango desfiado" → captura "frango desfiado"
+                rf'\d+\s*(?:g|kg|ml|l)\s+(?:de\s+)?([^,\n]*?{re.escape(palavra)}[^,\n]*)',
+                # "frango desfiado 300g" → captura "frango desfiado"
+                rf'([^,\n]*?{re.escape(palavra)}[^,\n]*?)\s*\d+\s*(?:g|kg|ml|l)',
+                # Qualquer menção
+                rf'([^,\n]*?{re.escape(palavra)}[^,\n]*)',
+            ]
+            for pat in patterns:
+                match = re.search(pat, texto_lower, re.IGNORECASE)
+                if match:
+                    nome = match.group(1).strip().strip('-').strip()
+                    # Remove números e unidades do nome
+                    nome = re.sub(r'\d+\s*(?:g|kg|ml|l)\s*(?:de\s+)?', '', nome).strip()
+                    if nome and nome not in manipulados and len(nome) > 2:
+                        manipulados.append(nome)
+                    break
+
+    return manipulados
 
 
 def _iniciar_boas_vindas(telefone: str) -> None:
@@ -528,7 +614,7 @@ def _conversar_coleta_dados(telefone: str, texto: str, estado: dict) -> None:
     }]
 
     try:
-        modelo = getattr(config, "OPENAI_MODEL", "gpt-4.1-mini")
+        modelo = getattr(config, "OPENAI_MODEL", "gpt-4.1")
         resposta = _chamar_openai_com_retry(mensagens, tools, modelo)
         message = resposta.choices[0].message
 
@@ -743,7 +829,10 @@ def _iniciar_assinatura(telefone: str, metodo: str, dados_cadastro: dict = None)
 def _enviar_menu_principal(telefone: str, assinante: dict) -> None:
     nome = assinante.get("nome") or "cliente"
     fichas_rest = assinante["fichas_limite_mes"] - assinante["fichas_geradas_mes"]
-    whatsapp.enviar_texto(telefone, _msg("menu_principal", nome=nome, fichas_rest=fichas_rest))
+    texto_menu = _msg("menu_principal", nome=nome, fichas_rest=fichas_rest)
+    whatsapp.enviar_texto(telefone, texto_menu)
+    # Salvar no histórico para o LLM saber que já pediu o nome do prato
+    banco.salvar_mensagem(telefone, "assistant", texto_menu)
 
 
 
@@ -830,6 +919,9 @@ def _normalizar_lista_modo_preparo(texto: str) -> list[str]:
 
     passos = []
     for linha in linhas:
+        # Ignorar linhas que são apenas números soltos (ex: "2", "3", "4")
+        if re.fullmatch(r"\d+\.?\s*", linha):
+            continue
         # Remover numeração inicial (1. 2) 3- etc.)
         passo = re.sub(r"^\d+[\)\.\-:\s]+", "", linha).strip()
         if passo:
@@ -1112,6 +1204,47 @@ def _fluxo_coleta_foto_operacional(telefone: str, texto: str, estado: dict, assi
     whatsapp.enviar_texto(telefone, _msg("foto_ainda_necessaria"))
 
 
+def _reescrever_modo_preparo(passos_brutos: list[str], nome_prato: str = "") -> list[str]:
+    """Usa o LLM para reescrever o modo de preparo de forma profissional e clara."""
+    texto_bruto = "\n".join(passos_brutos)
+    try:
+        from painel.models import ConfiguracaoIA
+        _cfg = ConfiguracaoIA.get_config()
+        modelo = _cfg.modelo_ia or "gpt-4.1"
+
+        resp = _gpt.chat.completions.create(
+            model=modelo,
+            max_tokens=1000,
+            temperature=0.3,
+            timeout=30,
+            messages=[
+                {"role": "system", "content": (
+                    "Voce e um editor de fichas tecnicas de cozinha profissional. "
+                    "Reescreva o modo de preparo abaixo em passos claros, objetivos e profissionais. "
+                    "Regras:\n"
+                    "- Cada passo deve ser UMA acao clara e completa\n"
+                    "- Remova numeracoes, o sistema numera automaticamente\n"
+                    "- Use linguagem profissional de cozinha (ex: 'Incorpore', 'Reserve', 'Leve ao forno')\n"
+                    "- Mantenha tempos e temperaturas exatos como informados\n"
+                    "- Nao invente passos nem altere a receita\n"
+                    "- Retorne APENAS os passos, um por linha, sem numeros nem marcadores\n"
+                    "- Maximo 10 passos (agrupe se necessario)"
+                )},
+                {"role": "user", "content": f"Prato: {nome_prato}\n\nModo de preparo bruto:\n{texto_bruto}"}
+            ]
+        )
+        texto_limpo = resp.choices[0].message.content or ""
+        passos_reescritos = _normalizar_lista_modo_preparo(texto_limpo)
+        if passos_reescritos:
+            logger.info("[Preparo] Modo de preparo reescrito: %d passos brutos → %d passos limpos",
+                        len(passos_brutos), len(passos_reescritos))
+            return passos_reescritos
+    except Exception as e:
+        logger.warning("[Preparo] Falha ao reescrever modo de preparo: %s — usando bruto", e)
+
+    return passos_brutos
+
+
 def _fluxo_coleta_modo_preparo_operacional(telefone: str, texto: str, estado: dict, assinante: dict) -> None:
     fluxo = estado.get("dados", {})
     passos = _normalizar_lista_modo_preparo(texto)
@@ -1119,6 +1252,10 @@ def _fluxo_coleta_modo_preparo_operacional(telefone: str, texto: str, estado: di
     if not passos:
         whatsapp.enviar_texto(telefone, _msg("modo_preparo_nao_identificado"))
         return
+
+    # Reescreve o modo de preparo de forma profissional via LLM
+    nome_prato = fluxo.get("tecnica_dados", {}).get("nome_prato", "")
+    passos = _reescrever_modo_preparo(passos, nome_prato)
 
     fluxo["modo_preparo"] = passos
     banco.set_estado(telefone, "aguardando_modo_preparo_operacional", fluxo)
@@ -1160,26 +1297,73 @@ def _conversar_com_ia(telefone: str, texto: str, assinante: dict) -> None:
         logger.warning("[IA] Falha ao carregar base de perdas: %s", e)
         perdas_texto = ""
 
-    contexto_extra = f"""
-CONTEXTO DO CLIENTE:
+    # Carregar subfichas já calculadas do estado
+    estado_atual = banco.get_estado(telefone)
+    dados_estado = estado_atual.get("dados", {})
+    subfichas_calculadas = dados_estado.get("subfichas_calculadas", {})
+    if subfichas_calculadas:
+        subfichas_texto = "\n".join(
+            f"- {nome}: R$ {info['custo_por_kg']:.2f}/kg (rendimento {info['rendimento_kg']:.2f}kg, custo total R$ {info['custo_total']:.2f})"
+            for nome, info in subfichas_calculadas.items()
+        )
+    else:
+        subfichas_texto = ""
+
+    nome_prato_atual = dados_estado.get("nome_prato", "")
+
+    # Monta contexto enxuto — perdas só quando necessário
+    partes_contexto = [f"""CONTEXTO DO CLIENTE:
 - Nome: {assinante.get('nome', 'nao informado')}
 - Estabelecimento: {assinante.get('estabelecimento', 'nao informado')}
 - Nicho: {assinante.get('nicho', 'nao informado')}
 - Cidade: {assinante.get('cidade', 'nao informado')}
 - Fichas restantes este mes: {fichas_rest}
-- Ingredientes ja cadastrados: {', '.join(nomes_ing) if nomes_ing else 'nenhum ainda'}
 
+- Ingredientes ja usados em fichas anteriores (SEM preco salvo — SEMPRE peca o preco de novo): {', '.join(nomes_ing) if nomes_ing else 'nenhum ainda'}"""]
+
+    if nome_prato_atual:
+        partes_contexto.append(f"- Prato atual: {nome_prato_atual}")
+
+    if subfichas_texto:
+        partes_contexto.append(f"""
+SUBFICHAS JA CALCULADAS (use estes custos por kg na ficha principal — NAO recalcule, NAO pergunte de novo):
+{subfichas_texto}
+IMPORTANTE: Estes ingredientes JA TEM custo definido. Use o custo_unit acima direto na ficha. FC=1.0, sem perda.""")
+
+    # Só injeta perdas se já tem nome do prato (está coletando ingredientes ou além)
+    if nome_prato_atual and perdas_texto:
+        partes_contexto.append(f"""
 BASE DE PERDAS PADRAO (use como referencia ao perguntar sobre perdas):
-{perdas_texto if perdas_texto else 'Nenhuma perda cadastrada.'}
-"""
+{perdas_texto}""")
+
+    contexto_extra = "\n".join(partes_contexto)
 
     from painel.models import ConfiguracaoIA
     _cfg = ConfiguracaoIA.get_config()
     _sys_prompt = _cfg.get_system_prompt() or SYSTEM_PROMPT
     system_com_contexto = _sys_prompt + "\n\n" + contexto_extra
-    
+
     # Prepara mensagens para OpenAI (System prompt embutido no histÃ³rico)
     mensagens_openai = [{"role": "system", "content": system_com_contexto}] + historico
+
+    # ── DETECÇÃO AUTOMÁTICA DE MANIPULADOS (código Python, não LLM) ──
+    # Analisa a mensagem atual do usuário. Se contém ingredientes manipulados,
+    # injeta instrução EXPLÍCITA pro LLM perguntar "faz em casa ou compra pronto?"
+    manipulados_detectados = _detectar_manipulados(texto)
+    if manipulados_detectados:
+        lista_manip = ", ".join(manipulados_detectados)
+        instrucao_manipulados = (
+            f"[INSTRUCAO DO SISTEMA — PRIORIDADE MAXIMA]\n"
+            f"O sistema detectou que os seguintes ingredientes sao MANIPULADOS/PRE-PREPARADOS: {lista_manip}\n"
+            f"Voce DEVE perguntar para CADA um deles: \"Esse [nome] voce faz ai na casa ou compra pronto?\"\n"
+            f"NAO peca preco desses ingredientes ANTES de saber se o cliente faz em casa ou compra pronto.\n"
+            f"Se faz em casa → inicie SUBFICHA (Bloco 2.5).\n"
+            f"Se compra pronto → ai sim peca o preco.\n"
+            f"Para os DEMAIS ingredientes que NAO estao nesta lista, peca o preco normalmente."
+        )
+        # Insere como mensagem de sistema logo antes da última mensagem do usuário
+        mensagens_openai.insert(-1, {"role": "system", "content": instrucao_manipulados})
+        logger.info("[Manipulados] Detectados para %s: %s", telefone, lista_manip)
 
     try:
         # Detecta se deve gerar arquivo via ferramenta (formato OpenAI)
@@ -1188,7 +1372,7 @@ BASE DE PERDAS PADRAO (use como referencia ao perguntar sobre perdas):
                 "type": "function",
                 "function": {
                     "name": "gerar_ficha_tecnica",
-                    "description": "Chame quando todos os dados estiverem coletados. NAO faca resumo nem calculos — o sistema gera o resumo automaticamente com calculos corretos. Apenas passe os dados coletados.",
+                    "description": "Gera ficha tecnica. Passe todos os ingredientes com custo_unit, peso_liquido, FC e IC.",
                     "parameters": {
                         "type": "object",
                         "properties": {
@@ -1222,8 +1406,22 @@ BASE DE PERDAS PADRAO (use como referencia ao perguntar sobre perdas):
             {
                 "type": "function",
                 "function": {
+                    "name": "definir_prato",
+                    "description": "Salva o nome do prato. Chame ao receber o nome.",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "nome_prato": {"type": "string", "description": "Nome do prato informado pelo cliente"},
+                        },
+                        "required": ["nome_prato"]
+                    }
+                }
+            },
+            {
+                "type": "function",
+                "function": {
                     "name": "calcular_subficha",
-                    "description": "Calcula o custo por kg de um pre-preparo (subficha). Passe os ingredientes com custo_unit em R$/kg e peso em kg, e o rendimento total em kg. O sistema calcula e retorna o custo/kg correto. SEMPRE use esta function para calculos de subficha — NUNCA faca a conta voce mesmo.",
+                    "description": "Calcula custo/kg de um pre-preparo. Passe ingredientes (nome, peso_kg, custo_unit) e rendimento_kg.",
                     "parameters": {
                         "type": "object",
                         "properties": {
@@ -1250,7 +1448,7 @@ BASE DE PERDAS PADRAO (use como referencia ao perguntar sobre perdas):
                 "type": "function",
                 "function": {
                     "name": "salvar_ingredientes",
-                    "description": "Salva ingredientes na base do cliente apÃ³s coletar nome, unidade, custo, FC e IC.",
+                    "description": "Salva ingredientes na base do cliente (apenas nome, unidade, FC e IC — SEM custo).",
                     "parameters": {
                         "type": "object",
                         "properties": {
@@ -1261,11 +1459,10 @@ BASE DE PERDAS PADRAO (use como referencia ao perguntar sobre perdas):
                                     "properties": {
                                         "nome":    {"type": "string"},
                                         "unidade": {"type": "string"},
-                                        "custo":   {"type": "number"},
                                         "fc":      {"type": "number"},
                                         "ic":      {"type": "number"},
                                     },
-                                    "required": ["nome", "unidade", "custo"]
+                                    "required": ["nome", "unidade"]
                                 }
                             }
                         },
@@ -1276,7 +1473,7 @@ BASE DE PERDAS PADRAO (use como referencia ao perguntar sobre perdas):
         ]
 
         # ConfiguraÃ§Ã£o do modelo caso nÃ£o tenha sido migrada
-        modelo_escolhido = _cfg.modelo_ia or getattr(config, 'OPENAI_MODEL', 'gpt-4.1-mini')
+        modelo_escolhido = _cfg.modelo_ia or getattr(config, 'OPENAI_MODEL', 'gpt-4.1')
 
         resposta = _chamar_openai_com_retry(mensagens_openai, tools, modelo_escolhido)
 
@@ -1285,6 +1482,15 @@ BASE DE PERDAS PADRAO (use como referencia ao perguntar sobre perdas):
         # Processa resposta textual e tools (se houver)
         texto_resposta = message.content or ""
         tool_calls = message.tool_calls
+
+        # Limpa JSON de tool calls que o modelo às vezes despeja no content
+        if tool_calls and texto_resposta:
+            texto_resposta = re.sub(
+                r'\{[\s\n]*"tool_uses"[\s\S]*?\}\s*$', '', texto_resposta
+            ).strip()
+            texto_resposta = re.sub(
+                r'\{[\s\n]*"recipient_name"[\s\S]*?\}\s*$', '', texto_resposta
+            ).strip()
 
         # Reseta contador de falhas
         _falhas.delete(telefone)
@@ -1306,7 +1512,30 @@ BASE DE PERDAS PADRAO (use como referencia ao perguntar sobre perdas):
                     logger.error("Erro ao decodificar argumentos da função %s", tool_name)
                     continue
 
-                if tool_name == "gerar_ficha_tecnica":
+                if tool_name == "definir_prato":
+                    nome_prato = tool_input.get("nome_prato", "")
+                    estado_at = banco.get_estado(telefone)
+                    dados_at = estado_at.get("dados", {})
+                    dados_at["nome_prato"] = nome_prato
+                    banco.set_estado(telefone, estado_at["estado"], dados_at)
+                    logger.info("[Agente] Nome do prato salvo: %s", nome_prato)
+                    # Envia o texto do LLM ou fallback pedindo ingredientes
+                    if texto_resposta and not texto_enviado:
+                        whatsapp.enviar_texto(telefone, texto_resposta)
+                        banco.salvar_mensagem(telefone, "assistant", texto_resposta)
+                        texto_enviado = True
+                    elif not texto_enviado:
+                        msg_fallback = (
+                            f"Otimo! Vamos montar a ficha do {nome_prato} 🍽\n\n"
+                            "Me mande os ingredientes com as quantidades usadas no prato e quantas porcoes rende.\n\n"
+                            "Exemplo: 300g de frango, 100g de arroz, 200ml de leite - rende 1 porcao"
+                        )
+                        whatsapp.enviar_texto(telefone, msg_fallback)
+                        banco.salvar_mensagem(telefone, "assistant", msg_fallback)
+                        texto_enviado = True
+                    continue
+
+                elif tool_name == "gerar_ficha_tecnica":
                     tool_input["estabelecimento"] = assinante.get("estabelecimento", "")
                     _iniciar_fluxo_pos_coleta_tecnica(telefone, tool_input)
                     continue
@@ -1319,9 +1548,22 @@ BASE DE PERDAS PADRAO (use como referencia ao perguntar sobre perdas):
 
                 elif tool_name == "calcular_subficha":
                     resultado = _calcular_subficha_python(tool_input)
-                    # Envia resultado ao usuário e salva no histórico
+                    _salvar_subficha_no_estado(telefone, tool_input, resultado)
+                    # Envia resultado ao usuário
                     whatsapp.enviar_texto(telefone, resultado["mensagem"])
                     banco.salvar_mensagem(telefone, "assistant", resultado["mensagem"])
+                    # Sempre envia confirmação pós-subficha (não depende do LLM)
+                    nome_sub = tool_input.get("nome_subficha", "pre-preparo")
+                    estado_pos = banco.get_estado(telefone)
+                    dados_pos = estado_pos.get("dados", {})
+                    subfichas_pendentes = []
+                    nome_prato_ctx = dados_pos.get("nome_prato", "prato principal")
+                    # Verifica se há mais subfichas pendentes no histórico
+                    # (o LLM pode ter mencionado outros pré-preparos)
+                    todas_subfichas = dados_pos.get("subfichas_calculadas", {})
+                    msg_confirmacao = f"Seu {nome_sub} ficou a R$ {resultado['custo_por_kg']:.2f}/kg. Esta certo ou quer ajustar algo?\n\nSe estiver ok, podemos continuar com o {nome_prato_ctx}!"
+                    whatsapp.enviar_texto(telefone, msg_confirmacao)
+                    banco.salvar_mensagem(telefone, "assistant", msg_confirmacao)
                     texto_enviado = True
                     continue
 
@@ -1331,7 +1573,6 @@ BASE DE PERDAS PADRAO (use como referencia ao perguntar sobre perdas):
                             telefone,
                             ing["nome"],
                             ing.get("unidade", "kg"),
-                            ing.get("custo", 0),
                             ing.get("fc", 1.0),
                             ing.get("ic", 1.0),
                         )
@@ -1345,8 +1586,53 @@ BASE DE PERDAS PADRAO (use como referencia ao perguntar sobre perdas):
 
         # Resposta de texto normal (sem tools)
         if texto_resposta:
-            banco.salvar_mensagem(telefone, "assistant", texto_resposta)
-            whatsapp.enviar_texto(telefone, texto_resposta)
+            # Detecta se o modelo despejou JSON de tool call no texto (fallback)
+            tool_json_match = re.search(
+                r'\{\s*"tool_uses"\s*:\s*\[[\s\S]*?\]\s*\}', texto_resposta
+            )
+            if tool_json_match:
+                try:
+                    tool_data = json.loads(tool_json_match.group())
+                    texto_limpo = texto_resposta[:tool_json_match.start()].strip()
+                    for tool_use in tool_data.get("tool_uses", []):
+                        func_name = tool_use.get("recipient_name", "").replace("functions.", "")
+                        params = tool_use.get("parameters", {})
+                        if func_name == "calcular_subficha":
+                            resultado = _calcular_subficha_python(params)
+                            _salvar_subficha_no_estado(telefone, params, resultado)
+                            whatsapp.enviar_texto(telefone, resultado["mensagem"])
+                            banco.salvar_mensagem(telefone, "assistant", resultado["mensagem"])
+                            # Confirmação pós-subficha
+                            nome_sub = params.get("nome_subficha", "pre-preparo")
+                            estado_fb = banco.get_estado(telefone)
+                            nome_prato_fb = estado_fb.get("dados", {}).get("nome_prato", "prato principal")
+                            msg_conf = f"Seu {nome_sub} ficou a R$ {resultado['custo_por_kg']:.2f}/kg. Esta certo ou quer ajustar algo?\n\nSe estiver ok, podemos continuar com o {nome_prato_fb}!"
+                            whatsapp.enviar_texto(telefone, msg_conf)
+                            banco.salvar_mensagem(telefone, "assistant", msg_conf)
+                            logger.warning("[Agente] Tool call extraída do texto (fallback): %s", func_name)
+                        elif func_name == "gerar_ficha_tecnica":
+                            params["estabelecimento"] = assinante.get("estabelecimento", "")
+                            if texto_limpo:
+                                banco.salvar_mensagem(telefone, "assistant", texto_limpo)
+                            _iniciar_fluxo_pos_coleta_tecnica(telefone, params)
+                            logger.warning("[Agente] Tool call extraída do texto (fallback): %s", func_name)
+                        else:
+                            logger.warning("[Agente] Tool desconhecida no texto: %s", func_name)
+                            banco.salvar_mensagem(telefone, "assistant", texto_resposta)
+                            whatsapp.enviar_texto(telefone, texto_resposta)
+                except (json.JSONDecodeError, KeyError) as parse_err:
+                    logger.error("[Agente] Falha ao parsear tool JSON do texto: %s", parse_err)
+                    banco.salvar_mensagem(telefone, "assistant", texto_resposta)
+                    whatsapp.enviar_texto(telefone, texto_resposta)
+            else:
+                banco.salvar_mensagem(telefone, "assistant", texto_resposta)
+                whatsapp.enviar_texto(telefone, texto_resposta)
+        else:
+            # Safety net: LLM retornou resposta completamente vazia
+            logger.warning("[Agente] LLM retornou resposta vazia (sem texto e sem tools) para %s", telefone)
+            msg_vazia = "Desculpa, pode repetir? Nao entendi bem o que voce precisa."
+            whatsapp.enviar_texto(telefone, msg_vazia)
+            banco.salvar_mensagem(telefone, "assistant", msg_vazia)
 
     except Exception as e:
         safe_msg = repr(e).encode('utf-8', 'ignore').decode('utf-8')
@@ -1480,18 +1766,36 @@ def _registrar_ficha_gerada(telefone: str, dados: dict, tipo: str, nome_prato: s
 
 
 def _salvar_ingredientes_da_ficha(telefone: str, dados: dict) -> None:
+    """Salva ingredientes da ficha SEM custo — preco muda e deve ser pedido a cada ficha."""
     ingredientes = dados.get("ingredientes", [])
     for ing in ingredientes:
         banco.salvar_ingrediente(
             telefone,
             ing.get("nome", ""),
             ing.get("unidade", "kg"),
-            ing.get("custo_unit", 0),
             ing.get("fc", 1.0),
             ing.get("ic", 1.0),
         )
     if ingredientes:
         logger.info("[Banco] Ingredientes atualizados: %s item(ns)", len(ingredientes))
+
+
+def _salvar_subficha_no_estado(telefone: str, tool_input: dict, resultado: dict) -> None:
+    """Salva resultado da subficha no estado para o LLM lembrar nas próximas mensagens."""
+    estado = banco.get_estado(telefone)
+    dados = estado.get("dados", {})
+    subfichas = dados.get("subfichas_calculadas", {})
+
+    nome = tool_input.get("nome_subficha", "?")
+    subfichas[nome] = {
+        "custo_por_kg": resultado["custo_por_kg"],
+        "rendimento_kg": resultado["rendimento_kg"],
+        "custo_total": resultado["custo_total"],
+    }
+
+    dados["subfichas_calculadas"] = subfichas
+    banco.set_estado(telefone, estado["estado"], dados)
+    logger.info("[Subficha] Salva no estado: %s = R$ %.2f/kg", nome, resultado["custo_por_kg"])
 
 
 def _calcular_subficha_python(dados: dict) -> dict:

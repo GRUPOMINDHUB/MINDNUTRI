@@ -177,23 +177,24 @@ def salvar_ficha(telefone: str, dados: dict) -> int:
 # ── INGREDIENTES ──────────────────────────────────────────────────
 
 def get_ingredientes(telefone: str) -> list[dict]:
+    """Retorna ingredientes cadastrados — SEM custo (preco se pede a cada ficha)."""
     ings = Ingrediente.objects.filter(telefone=telefone).order_by('nome')
     return [{
         "nome": i.nome,
         "unidade": i.unidade,
-        "custo_unitario": i.custo_unitario,
         "fc": float(i.fc),
         "ic": float(i.ic)
     } for i in ings]
 
 def salvar_ingrediente(telefone: str, nome: str, unidade: str,
-                        custo: float, fc: float = 1.0, ic: float = 1.0) -> None:
+                        fc: float = 1.0, ic: float = 1.0) -> None:
+    """Salva ingrediente SEM custo — preco muda e deve ser pedido a cada ficha."""
     assinante = Assinante.objects.filter(telefone=telefone).first()
     obj, created = Ingrediente.objects.update_or_create(
         telefone=telefone, nome=nome,
         defaults={
             'unidade': unidade,
-            'custo_unitario': custo,
+            'custo_unitario': 0,
             'fc': fc,
             'ic': ic,
             'assinante': assinante

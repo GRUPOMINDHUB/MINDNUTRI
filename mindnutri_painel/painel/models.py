@@ -204,7 +204,7 @@ class ConfiguracaoIA(models.Model):
     )
 
     # Parâmetros do modelo
-    modelo_ia = models.CharField(max_length=50, default='gpt-4.1-mini')
+    modelo_ia = models.CharField(max_length=50, default='gpt-4.1')
     max_tokens = models.IntegerField(default=3000)
     temperatura = models.FloatField(default=0.7)
 

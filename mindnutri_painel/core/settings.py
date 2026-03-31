@@ -183,4 +183,4 @@ PLANO_VALOR         = float(os.getenv("PLANO_VALOR", "89.90"))
 PLANO_FICHAS_LIMITE = int(os.getenv("PLANO_FICHAS_LIMITE", "30"))
 
 # Modelo OpenAI
-OPENAI_MODEL = "gpt-4.1-mini"
+OPENAI_MODEL = "gpt-4.1"
