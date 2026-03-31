@@ -138,6 +138,13 @@ def bloquear_por_inadimplencia(telefone: str, payment_data: dict):
 
     whatsapp.enviar_texto(telefone, msg)
 
+    from utils.alertas_grupo import alertar_negocio
+    alertar_negocio(
+        "Inadimplência", "Acesso Bloqueado por Inadimplência",
+        f"Pagamento em atraso. Acesso suspenso automaticamente.",
+        telefone=telefone, nome=assinante.get('nome', telefone),
+    )
+
 
 # ── CANCELAMENTO (webhook SUBSCRIPTION_INACTIVATED) ──────────────
 
@@ -155,6 +162,13 @@ def cancelar_assinante(telefone: str):
     whatsapp.enviar_texto(telefone,
         "Sua assinatura Mindnutri foi encerrada.\n\n"
         "Foi um prazer te ajudar! Se quiser voltar, é só entrar em contato. 😊"
+    )
+
+    from utils.alertas_grupo import alertar_negocio
+    alertar_negocio(
+        "Não Renovação", "Assinatura Cancelada",
+        f"Assinante cancelou a assinatura.",
+        telefone=telefone,
     )
 
 
@@ -427,3 +441,10 @@ def _notificar_gestor_novo_assinante(telefone: str):
             f"🍽 {nicho}\n"
             f"📱 {telefone}"
         )
+
+    from utils.alertas_grupo import alertar_negocio
+    alertar_negocio(
+        "Novo Assinante", "Novo Assinante!",
+        f"🏪 {estab}\n🍽 {nicho}",
+        telefone=telefone, nome=nome,
+    )

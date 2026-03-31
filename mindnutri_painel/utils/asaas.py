@@ -220,6 +220,11 @@ def processar_webhook_asaas(evento: str, payment_data: dict) -> None:
     """
     Processa webhooks do Asaas com idempotência ATÔMICA.
     Registra ANTES de processar — se já existe, ignora.
+
+    Resolução do assinante (3 caminhos, em ordem):
+      1. customer_id  → Assinante.asaas_id
+      2. paymentLink  → Assinante.payment_link_id + fallback EstadoConversa
+      3. externalReference → telefone direto (sempre definido na cobrança)
     """
     from painel.models import WebhookProcessado
 
@@ -241,17 +246,38 @@ def processar_webhook_asaas(evento: str, payment_data: dict) -> None:
 
     customer_id = payment_data.get("customer", "")
     payment_link_id = payment_data.get("paymentLink", "")
+    external_ref = payment_data.get("externalReference", "")
 
+    # Caminho 1: busca por customer_id
     assinante = _buscar_por_customer_id(customer_id)
+
+    # Caminho 2: busca por payment_link_id
     if not assinante and payment_link_id:
         assinante = _buscar_por_payment_link_id(payment_link_id)
+
+    # Caminho 3: busca por externalReference (telefone direto)
+    if not assinante and external_ref:
+        assinante = _buscar_por_telefone(external_ref)
+        if assinante:
+            logger.info("[Asaas] Assinante encontrado via externalReference: %s", external_ref)
+
     if not assinante:
-        logger.warning("[Asaas] Webhook ignorado - customer nao encontrado: %s / paymentLink: %s", customer_id, payment_link_id)
+        logger.warning(
+            "[Asaas] Webhook ignorado - assinante nao encontrado: "
+            "customer=%s / paymentLink=%s / externalRef=%s",
+            customer_id, payment_link_id, external_ref,
+        )
+        from utils.alertas_grupo import alertar_erro
+        alertar_erro(
+            "Webhook Asaas Órfão",
+            f"Evento: {evento}\ncustomer: {customer_id}\npaymentLink: {payment_link_id}\nexternalRef: {external_ref}",
+        )
         return
 
     telefone = assinante["telefone"]
 
     with transaction.atomic():
+        # Atualizar customer_id se mudou (ex: primeiro pagamento por link)
         if customer_id and assinante.get("asaas_customer_id") != customer_id:
             banco.atualizar_assinante(telefone, asaas_customer_id=customer_id)
 
@@ -267,6 +293,12 @@ def processar_webhook_asaas(evento: str, payment_data: dict) -> None:
                 f"{assinante.get('nome', telefone)} - pagamento em atraso.",
                 telefone,
             )
+            from utils.alertas_grupo import alertar_negocio
+            alertar_negocio(
+                "Inadimplência", "Pagamento em Atraso",
+                f"Pagamento em atraso. Acesso suspenso automaticamente.",
+                telefone=telefone, nome=assinante.get('nome', telefone),
+            )
             from utils.whatsapp import enviar_texto
             enviar_texto(telefone, _msg("webhook_pagamento_atraso"))
 
@@ -278,6 +310,12 @@ def processar_webhook_asaas(evento: str, payment_data: dict) -> None:
                 "Assinatura cancelada",
                 f"{assinante.get('nome', telefone)} - assinatura cancelada.",
                 telefone,
+            )
+            from utils.alertas_grupo import alertar_negocio
+            alertar_negocio(
+                "Não Renovação", "Assinatura Cancelada",
+                f"Assinatura cancelada/inativada via webhook ({evento}).",
+                telefone=telefone, nome=assinante.get('nome', telefone),
             )
 
 
@@ -292,6 +330,7 @@ def _processar_pagamento_confirmado(telefone: str, assinante: dict) -> None:
         data_inicio=assinante.get("data_inicio") or date.today().isoformat(),
         proxima_cobranca=(date.today() + timedelta(days=30)).isoformat(),
         fichas_geradas_mes=0,
+        payment_link_id="",  # Limpar para não reusar em futuro webhook
     )
 
     if era_primeiro:
@@ -349,6 +388,13 @@ def _buscar_por_payment_link_id(payment_link_id: str) -> dict | None:
             return banco.get_assinante(estado.telefone)
 
     return None
+
+
+def _buscar_por_telefone(telefone: str) -> dict | None:
+    """Busca assinante diretamente pelo telefone (usado via externalReference)."""
+    if not telefone:
+        return None
+    return banco.get_assinante(telefone)
 
 
 def _boas_vindas_pos_pagamento(telefone: str) -> None:

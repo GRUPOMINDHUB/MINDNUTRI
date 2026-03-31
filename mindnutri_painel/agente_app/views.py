@@ -52,6 +52,8 @@ def _processar_em_background(telefone: str, tipo: str, texto: str | None,
     except Exception as e:
         safe_msg = repr(e).encode('utf-8', 'ignore').decode('utf-8')
         logger.error("[Agente] Erro ao processar mensagem de %s: %s", telefone, safe_msg, exc_info=True)
+        from utils.alertas_grupo import alertar_erro
+        alertar_erro("Erro Genérico", safe_msg, telefone=telefone)
     finally:
         lock.release()
 

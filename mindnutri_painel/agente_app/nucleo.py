@@ -72,6 +72,8 @@ def _chamar_openai_com_retry(mensagens, tools, modelo, max_tentativas=3):
         except openai.APIConnectionError:
             logger.warning("[OpenAI] Conexão falhou (tentativa %d/%d)", tentativa + 1, max_tentativas)
             _time.sleep(1)
+    from utils.alertas_grupo import alertar_erro
+    alertar_erro("Erro OpenAI", "Máximo de tentativas OpenAI atingido (rate limit / timeout / conexão)")
     raise openai.APIError("Máximo de tentativas OpenAI atingido")
 
 
@@ -215,6 +217,8 @@ def _processar_midia(telefone: str, tipo: str, texto: str | None,
             texto_transcrito = midia.transcrever_audio(midia_bytes)
         except Exception as e:
             logger.error("[Midia] Falha ao transcrever audio de %s: %s", telefone, e)
+            from utils.alertas_grupo import alertar_erro
+            alertar_erro("Erro Transcrição Áudio", str(e), telefone=telefone, estado=estado_atual)
             whatsapp.enviar_texto(telefone, _msg("audio_nao_transcrito"))
             return None, tipo
         if not texto_transcrito:
@@ -227,6 +231,8 @@ def _processar_midia(telefone: str, tipo: str, texto: str | None,
             ingredientes = midia.extrair_ingredientes_de_imagem(midia_bytes)
         except Exception as e:
             logger.error("[Midia] Falha ao extrair ingredientes de imagem de %s: %s", telefone, e)
+            from utils.alertas_grupo import alertar_erro
+            alertar_erro("Erro Processamento Imagem", str(e), telefone=telefone, estado=estado_atual)
             whatsapp.enviar_texto(
                 telefone,
                 "Recebi sua imagem, mas não consegui processá-la. "
@@ -662,6 +668,8 @@ def _conversar_coleta_dados(telefone: str, texto: str, estado: dict) -> None:
 
     except Exception as e:
         logger.error("[Coleta dados] Erro: %s", e)
+        from utils.alertas_grupo import alertar_erro
+        alertar_erro("Erro Coleta Dados", str(e), telefone=telefone, estado="coletando_dados")
         whatsapp.enviar_texto(telefone, _msg("dados_coleta_instabilidade"))
 def _enviar_exemplo_por_nicho(telefone: str, texto: str) -> None:
     """Envia os arquivos de exemplo para o nicho escolhido."""
@@ -791,7 +799,12 @@ def _iniciar_assinatura(telefone: str, metodo: str, dados_cadastro: dict = None)
 
         dados_estado = {"metodo_pagamento": metodo}
         if metodo == "cartao":
-            dados_estado["payment_link_id"] = pagamento.get("payment_link_id", "")
+            plid = pagamento.get("payment_link_id", "")
+            dados_estado["payment_link_id"] = plid
+            # Persistir no modelo Assinante (não apenas no estado)
+            # para que o webhook encontre mesmo se o estado expirar
+            if plid:
+                banco.atualizar_assinante(telefone, payment_link_id=plid)
             whatsapp.enviar_texto(telefone, _msg("link_cartao", link=link))
         else:
             dados_estado["payment_id"] = pagamento.get("payment_id", "")
@@ -815,6 +828,10 @@ def _iniciar_assinatura(telefone: str, metodo: str, dados_cadastro: dict = None)
             logger.error("ASAAS RESPONSE: %s", e.response.text)
 
         erro_body = e.response.text if isinstance(e, requests.exceptions.HTTPError) and hasattr(e, 'response') and e.response is not None else ""
+
+        from utils.alertas_grupo import alertar_erro
+        alertar_erro("Erro Pagamento Asaas", f"Método: {metodo} | {str(e)[:300]}", telefone=telefone, estado="aguardando_pagamento")
+
         if metodo == "pix" and "Pix" in erro_body:
             whatsapp.enviar_texto(telefone, _msg("pix_nao_habilitado"))
             banco.set_estado(telefone, "escolha_pagamento_assinatura", dados_cadastro or {})
@@ -1637,6 +1654,8 @@ BASE DE PERDAS PADRAO (use como referencia ao perguntar sobre perdas):
     except Exception as e:
         safe_msg = repr(e).encode('utf-8', 'ignore').decode('utf-8')
         logger.error("[OpenAI] Erro: %s", safe_msg)
+        from utils.alertas_grupo import alertar_erro
+        alertar_erro("Erro OpenAI", safe_msg, telefone=telefone, estado="criando_ficha")
         _registrar_falha(telefone, assinante)
 
 
@@ -1706,6 +1725,8 @@ def _gerar_e_enviar_arquivo(telefone: str, dados: dict, tipo: str, assinante: di
     except Exception as e:
         safe_msg = str(e).encode('utf-8', 'ignore').decode('utf-8')
         logger.error("[Gerador] Erro ao gerar arquivo: %s", safe_msg)
+        from utils.alertas_grupo import alertar_erro
+        alertar_erro("Erro Geração Ficha", f"{tipo} | {nome_prato_limpo} | {safe_msg}", telefone=telefone)
         whatsapp.enviar_texto(telefone, _msg("erro_gerar_ficha"))
         banco.criar_notificacao(
             "erro_sistema",
@@ -1885,10 +1906,14 @@ def _enviar_link_renovacao(telefone: str, assinante: dict, metodo: str) -> None:
                 "Mindhub Mindnutri - Renovacao antecipada",
             )
             link = pagamento.get("url", "")
+            plid = pagamento.get("payment_link_id", "")
+            # Persistir no modelo Assinante para o webhook encontrar
+            if plid:
+                banco.atualizar_assinante(telefone, payment_link_id=plid)
             banco.set_estado(
                 telefone,
                 "aguardando_pagamento",
-                {"payment_link_id": pagamento.get("payment_link_id", ""), "metodo_pagamento": metodo},
+                {"payment_link_id": plid, "metodo_pagamento": metodo},
             )
         else:
             from utils.asaas import criar_cobranca_pix
@@ -1908,5 +1933,7 @@ def _enviar_link_renovacao(telefone: str, assinante: dict, metodo: str) -> None:
         whatsapp.enviar_texto(telefone, _msg("link_renovacao", metodo=metodo, link=link))
     except Exception as e:
         logger.error("[Renovacao] Erro ao gerar link de renovacao para %s: %s", telefone, e)
+        from utils.alertas_grupo import alertar_erro
+        alertar_erro("Erro Renovação", str(e), telefone=telefone, estado="aguardando_renovacao")
         whatsapp.enviar_texto(telefone, _msg("erro_renovacao"))
 

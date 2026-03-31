@@ -178,6 +178,9 @@ STORAGE_LOCAL_PATH = os.getenv("STORAGE_LOCAL_PATH", "./arquivos_gerados")
 # Gestor
 GESTOR_WHATSAPP = os.getenv("GESTOR_WHATSAPP", "")
 
+# Grupo WhatsApp Alertas
+WHATSAPP_GRUPO_ALERTAS = os.getenv("WHATSAPP_GRUPO_ALERTAS", "")
+
 # Plano
 PLANO_VALOR         = float(os.getenv("PLANO_VALOR", "89.90"))
 PLANO_FICHAS_LIMITE = int(os.getenv("PLANO_FICHAS_LIMITE", "30"))
