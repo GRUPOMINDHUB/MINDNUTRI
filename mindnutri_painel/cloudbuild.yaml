@@ -1,0 +1,30 @@
+steps:
+  # 1. Build da imagem apontando para a pasta do painel
+  - name: 'gcr.io/cloud-builders/docker'
+    args: 
+      - 'build'
+      - '-t'
+      - 'us-central1-docker.pkg.dev/banco-conhecimento-py/mindlink-repo/mindlink-ia'
+      - './mindnutri_painel'
+
+  # 2. Push para o Artifact Registry
+  - name: 'gcr.io/cloud-builders/docker'
+    args: 
+      - 'push'
+      - 'us-central1-docker.pkg.dev/banco-conhecimento-py/mindlink-repo/mindlink-ia'
+
+  # 3. Deploy no Cloud Run
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    entrypoint: gcloud
+    args:
+      - 'run'
+      - 'deploy'
+      - 'mindnutri-site' # Nome que o serviço terá no Cloud Run
+      - '--image'
+      - 'us-central1-docker.pkg.dev/banco-conhecimento-py/mindlink-repo/mindlink-ia'
+      - '--region'
+      - 'us-central1'
+      - '--allow-unauthenticated'
+
+images:
+  - 'us-central1-docker.pkg.dev/banco-conhecimento-py/mindlink-repo/mindlink-ia'

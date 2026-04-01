@@ -1,0 +1,23 @@
+# --- Núcleo (Web e Servidor) ---
+Django>=4.2
+gunicorn
+python-dotenv
+
+# --- Banco de Dados ---
+dj-database-url
+psycopg2-binary
+
+# --- Geração de Arquivos (Fichas) ---
+reportlab
+openpyxl
+Pillow
+
+# --- Inteligência Artificial ---
+openai
+anthropic
+
+# --- Integrações (APIs, Asaas, Evolution) ---
+requests
+
+# --- Monitoramento (Opcional, mas configurado no settings) ---
+sentry-sdk
