@@ -16,7 +16,7 @@ Pillow
 openai
 anthropic
 
-# --- Integrações (APIs, Asaas, Evolution) ---
+# --- Integrações (APIs, Asaas, Evolution) --
 requests
 
 # --- Monitoramento (Opcional, mas configurado no settings) ---
