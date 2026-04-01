@@ -114,16 +114,26 @@ def gerar_ficha_pdf(dados: dict, caminho_saida: str, foto_path: str = None) -> s
                         width=110, height=32, preserveAspectRatio=True, mask='auto')
         except Exception:
             pass
-    c.setFillColor(BRANCO)
-    c.setFont(font_bold, 16)
-    c.drawCentredString(W/2, H - 16*mm, (dados.get("nome_prato", "") or "").strip().title().upper())
-    c.setFont(font_regular, 9)
-    c.setFillColor(colors.HexColor("#BBBBBB"))
-    c.drawCentredString(
-        W/2,
-        H - 22*mm,
-        f"{dados.get('codigo','')}  |  {dados.get('estabelecimento','')}" if dados.get('codigo') or dados.get('estabelecimento') else "",
+    # ── Título do prato no header (SEMPRE Paragraph para quebra de linha) ──
+    titulo_prato = (dados.get("nome_prato", "") or "").strip().title().upper()
+    titulo_max_w = W - 2 * (mg + 60)  # margem generosa para logo
+    # Escolhe fonte: reduz só se for MUITO longo (>50 chars), senão mantém 14
+    titulo_fs = 14 if len(titulo_prato) <= 35 else 12 if len(titulo_prato) <= 50 else 10
+    style_titulo = ParagraphStyle(
+        "titulo_header", fontName=font_bold, fontSize=titulo_fs,
+        leading=titulo_fs + 3, textColor=BRANCO, alignment=1,  # center
     )
+    par_titulo = Paragraph(titulo_prato, style_titulo)
+    pw, ph = par_titulo.wrap(titulo_max_w, 24*mm)
+    # Centraliza verticalmente no header (header = 28mm, topo do header = H)
+    header_center_y = H - 28*mm + (28*mm - ph) / 2
+    par_titulo.drawOn(c, (W - titulo_max_w) / 2, header_center_y)
+
+    c.setFont(font_regular, 8)
+    c.setFillColor(colors.HexColor("#BBBBBB"))
+    sub_info = f"{dados.get('codigo','')}  |  {dados.get('estabelecimento','')}" if dados.get('codigo') or dados.get('estabelecimento') else ""
+    if sub_info:
+        c.drawCentredString(W/2, header_center_y - 4*mm, sub_info)
 
     # Faixa vermelha
     c.setFillColor(VERMELHO)
@@ -170,10 +180,17 @@ def gerar_ficha_pdf(dados: dict, caminho_saida: str, foto_path: str = None) -> s
         c.setFont(font_regular, 7)
         c.drawCentredString(fx+fw/2, fy+fh/2-3*mm, "(enviar ao ativar)")
 
+    # ── Nome do prato abaixo da foto (SEMPRE Paragraph para quebra de linha) ──
     nome_prato_display = (dados.get("nome_prato", "") or "").strip().title()
-    c.setFillColor(PRETO)
-    c.setFont(font_bold, 11)
-    c.drawCentredString(x_foto+col_foto_w/2, fy-10*mm, nome_prato_display)
+    legenda_max_w = col_foto_w - 2 * fmg
+    legenda_fs = 10 if len(nome_prato_display) <= 25 else 8
+    style_legenda = ParagraphStyle(
+        "legenda_foto", fontName=font_bold, fontSize=legenda_fs,
+        leading=legenda_fs + 3, textColor=PRETO, alignment=1,
+    )
+    par_legenda = Paragraph(nome_prato_display, style_legenda)
+    plw, plh = par_legenda.wrap(legenda_max_w, 20*mm)
+    par_legenda.drawOn(c, x_foto + fmg, fy - 6*mm - plh)
     c.setFont(font_regular, 8)
     c.setFillColor(CINZA)
     # classificação removida — não exibir no PDF

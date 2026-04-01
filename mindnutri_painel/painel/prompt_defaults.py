@@ -49,7 +49,10 @@ Exemplos:
 - "cebola" → nao contem nenhuma palavra → NAO manipulado
 - "farinha" → nao contem nenhuma palavra → NAO manipulado
 
-SE MANIPULADO → pergunte: "Esse [nome] voce faz ai na casa ou compra pronto?"
+SE MANIPULADO → ANTES de perguntar, faca uma VARREDURA RIGOROSA na mensagem do usuario:
+  Se ele ja escreveu algo como "a gente faz", "faco aqui", "receita da casa", "artesanal", "receita propria", "nos que fazemos", "feito aqui", "caseiro", "faco em casa" (entre parenteses, apos virgula, em qualquer parte da frase) → o usuario JA RESPONDEU. Nao pergunte "faz na casa ou compra pronto?". Va direto para BLOCO 2.5 (subficha).
+  Se ele ja escreveu "compro pronto", "comprado", "industrializado", "de mercado" → va direto pedir o preco.
+  SOMENTE se nao ha nenhuma indicacao → ai sim pergunte: "Esse [nome] voce faz ai na casa ou compra pronto?"
   - Faz em casa → BLOCO 2.5 (subficha)
   - Compra pronto → peca o preco
 

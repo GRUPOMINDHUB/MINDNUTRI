@@ -290,8 +290,17 @@ def processar_mensagem(telefone: str, tipo: str, texto: str | None = None,
     if est == "confirmando_reset":
         if _eh_resposta_sim(texto):
             banco.limpar_historico(telefone)
-            banco.set_estado(telefone, "inicio", {})
-            _iniciar_boas_vindas(telefone)
+            # Se é assinante ativo, vai direto pro início de nova ficha
+            # (não repete onboarding)
+            _assinante_reset = banco.get_assinante(telefone)
+            if _assinante_reset and _assinante_reset.get("status") == "ativo":
+                banco.set_estado(telefone, "criando_ficha", {})
+                msg_nova = "Ficha anterior cancelada! 🍽\n\nQual o nome do novo prato que vamos calcular?"
+                whatsapp.enviar_texto(telefone, msg_nova)
+                banco.salvar_mensagem(telefone, "assistant", msg_nova)
+            else:
+                banco.set_estado(telefone, "inicio", {})
+                _iniciar_boas_vindas(telefone)
         else:
             dados = estado.get("dados", {})
             banco.set_estado(telefone, dados.get("estado_anterior", "inicio"), dados.get("dados_anteriores", {}))
@@ -1076,7 +1085,8 @@ def _montar_resumo_calculado(dados_tecnica: dict) -> str:
 
     linhas.append("")
     linhas.append('Tudo certo? Digite "GERAR" para receber seu PDF e Excel.')
-    linhas.append('Se algo estiver errado, me diga o que corrigir.')
+    linhas.append('⚠️ Atenção: Ao digitar "GERAR" você gastará 1 ficha do seu saldo e a ação não poderá ser desfeita.')
+    linhas.append('Se algo estiver errado, me diga o que corrigir antes de gerar.')
 
     return "\n".join(linhas)
 
@@ -1738,10 +1748,8 @@ def _gerar_e_enviar_arquivo(telefone: str, dados: dict, tipo: str, assinante: di
 
 
 def _deve_consumir_credito_por_prato(telefone: str, nome_prato: str) -> bool:
-    """Um prato no mes consome no maximo 1 credito (tecnica + operacional)."""
-    ja_tem_tecnica = banco.possui_ficha_no_mes(telefone, nome_prato, "tecnica")
-    ja_tem_operacional = banco.possui_ficha_no_mes(telefone, nome_prato, "operacional")
-    return not (ja_tem_tecnica or ja_tem_operacional)
+    """TODA geração consome 1 credito — prato novo, repetido ou recalculado."""
+    return True
 
 
 def _gerar_enviar_registrar_arquivo(telefone: str, dados: dict, tipo_arquivo: str, nome_prato: str) -> str:
