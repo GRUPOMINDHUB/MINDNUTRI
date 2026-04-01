@@ -686,14 +686,31 @@ def _enviar_exemplo_por_nicho(telefone: str, texto: str) -> None:
 
     if "1" in texto or "hamburguer" in texto_lower or "hambúrguer" in texto_lower or "burger" in texto_lower:
         nicho = "hamburguer"
-    elif "2" in texto or "pizza" in texto_lower:
-        nicho = "pizza"
-    elif "3" in texto or "sobremesa" in texto_lower or "brownie" in texto_lower or "doce" in texto_lower:
+    elif "2" in texto or "sobremesa" in texto_lower or "confeit" in texto_lower or "doce" in texto_lower or "brownie" in texto_lower:
         nicho = "sobremesa"
+    elif "3" in texto or "pizza" in texto_lower:
+        nicho = "pizza"
+    elif "4" in texto or "acai" in texto_lower or "açaí" in texto_lower or "açai" in texto_lower:
+        nicho = "acai"
+    elif "5" in texto or "brasileira" in texto_lower or "caseira" in texto_lower:
+        nicho = "comida_brasileira"
+    elif "6" in texto or "pao" in texto_lower or "pão" in texto_lower or "pães" in texto_lower or "paes" in texto_lower or "padaria" in texto_lower:
+        nicho = "paes"
+    elif "7" in texto or "salgado" in texto_lower or "coxinha" in texto_lower or "pastel" in texto_lower or "empada" in texto_lower:
+        nicho = "salgado"
     else:
         nicho = "hamburguer"
 
-    nicho_label = nicho.capitalize()
+    _NICHO_LABELS = {
+        "hamburguer": "Hambúrguer",
+        "sobremesa": "Sobremesa",
+        "pizza": "Pizza",
+        "acai": "Açaí",
+        "comida_brasileira": "Comida Brasileira",
+        "paes": "Pães",
+        "salgado": "Salgados",
+    }
+    nicho_label = _NICHO_LABELS.get(nicho, nicho.capitalize())
 
     whatsapp.enviar_texto(telefone, _msg("exemplo_nicho_intro", nicho_label=nicho_label))
 

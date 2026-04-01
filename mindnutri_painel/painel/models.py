@@ -7,8 +7,11 @@ class Assinante(models.Model):
     NICHO_CHOICES = [
         ('hamburguer', 'Hambúrguer'),
         ('pizza', 'Pizza'),
-        ('sobremesa', 'Sobremesa'),
+        ('sobremesa', 'Sobremesa / Confeitaria'),
+        ('acai', 'Açaí'),
         ('comida_brasileira', 'Comida Brasileira'),
+        ('paes', 'Pães / Padaria'),
+        ('salgado', 'Salgados'),
         ('outro', 'Outro'),
     ]
     STATUS_CHOICES = [

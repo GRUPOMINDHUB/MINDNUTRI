@@ -239,10 +239,13 @@ def processar_onboarding(telefone: str, texto: str, estado: dict):
         whatsapp.enviar_texto(telefone,
             "Qual é o *tipo do seu negócio*?\n\n"
             "1️⃣ Hambúrguer\n"
-            "2️⃣ Pizza\n"
-            "3️⃣ Sobremesa / Confeitaria\n"
-            "4️⃣ Comida Brasileira\n"
-            "5️⃣ Outro\n\n"
+            "2️⃣ Sobremesa / Confeitaria\n"
+            "3️⃣ Pizza\n"
+            "4️⃣ Açaí\n"
+            "5️⃣ Comida Brasileira\n"
+            "6️⃣ Pães / Padaria\n"
+            "7️⃣ Salgados\n"
+            "8️⃣ Outro\n\n"
             "Responda com o número ou o nome."
         )
 
@@ -381,21 +384,32 @@ def _mapear_nicho(texto: str) -> str:
     t = texto.lower()
     if "1" in t or "hamb" in t or "burger" in t:
         return "hamburguer"
-    elif "2" in t or "pizza" in t:
-        return "pizza"
-    elif "3" in t or "sobremesa" in t or "confeit" in t or "doce" in t:
+    elif "2" in t or "sobremesa" in t or "confeit" in t or "doce" in t:
         return "sobremesa"
-    elif "4" in t or "brasileira" in t or "caseira" in t:
+    elif "3" in t or "pizza" in t:
+        return "pizza"
+    elif "4" in t or "acai" in t or "açaí" in t or "açai" in t:
+        return "acai"
+    elif "5" in t or "brasileira" in t or "caseira" in t:
         return "comida_brasileira"
+    elif "6" in t or "pao" in t or "pão" in t or "pães" in t or "paes" in t or "padaria" in t:
+        return "paes"
+    elif "7" in t or "salgado" in t or "coxinha" in t or "pastel" in t or "empada" in t:
+        return "salgado"
+    elif "8" in t or "outro" in t:
+        return "outro"
     return "outro"
 
 
 def _nicho_display(nicho: str) -> str:
     return {
         "hamburguer":       "Hambúrguer",
-        "pizza":            "Pizza",
         "sobremesa":        "Sobremesa / Confeitaria",
+        "pizza":            "Pizza",
+        "acai":             "Açaí",
         "comida_brasileira":"Comida Brasileira",
+        "paes":             "Pães / Padaria",
+        "salgado":          "Salgados",
     }.get(nicho, "Outro")
 
 

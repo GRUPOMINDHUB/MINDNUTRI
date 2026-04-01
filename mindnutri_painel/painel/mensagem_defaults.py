@@ -32,8 +32,12 @@ MENSAGENS_PADRAO = [
             "Que tal eu te mostrar um exemplo do que sou capaz antes de começarmos?\n\n"
             "Escolha um segmento:\n\n"
             "1️⃣ Hambúrguer\n"
-            "2️⃣ Pizza\n"
-            "3️⃣ Sobremesa"
+            "2️⃣ Sobremesa / Confeitaria\n"
+            "3️⃣ Pizza\n"
+            "4️⃣ Açaí\n"
+            "5️⃣ Comida Brasileira\n"
+            "6️⃣ Pães / Padaria\n"
+            "7️⃣ Salgados"
         ),
         "variaveis": "",
         "ordem": 10,
