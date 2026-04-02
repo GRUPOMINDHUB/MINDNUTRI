@@ -150,9 +150,9 @@ if _SENTRY_DSN:
     except ImportError:
         pass
 
-LOGIN_URL = '/login/'
-LOGIN_REDIRECT_URL = '/'
-LOGOUT_REDIRECT_URL = '/login/'
+LOGIN_URL = '/admin/login/'
+LOGIN_REDIRECT_URL = '/admin/'
+LOGOUT_REDIRECT_URL = '/admin/login/'
 
 # ── HTTPS / Cookies seguros em produção ──────────────────────────
 if not DEBUG:
