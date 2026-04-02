@@ -99,8 +99,8 @@ TIME_ZONE = 'America/Sao_Paulo'
 USE_I18N = True
 USE_TZ = True
 
-FORCE_SCRIPT_NAME = '/mindnutri'
-STATIC_URL = '/mindnutri/static/'
+FORCE_SCRIPT_NAME = os.getenv("DJANGO_FORCE_SCRIPT_NAME", "").strip() or None
+STATIC_URL = f"{FORCE_SCRIPT_NAME or ''}/static/"
 STATIC_ROOT = BASE_DIR / 'staticfiles'
 
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
