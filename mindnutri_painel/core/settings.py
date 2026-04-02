@@ -6,16 +6,25 @@ load_dotenv(override=True)
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
+
+def _split_env_list(value: str):
+    return [item.strip() for item in value.split(",") if item.strip()]
+
 # ── SEGURANÇA ────────────────────────────────────────────────────
 SECRET_KEY = os.getenv("DJANGO_SECRET_KEY", "mindnutri-dev-key-TROQUE-EM-PRODUCAO")
 
 DEBUG = os.getenv("DJANGO_DEBUG", "true").lower() == "true"
 
-ALLOWED_HOSTS = [
-    h.strip()
-    for h in os.getenv("DJANGO_ALLOWED_HOSTS", "*").split(",")
-    if h.strip()
-]
+ALLOWED_HOSTS = _split_env_list(
+    os.getenv("DJANGO_ALLOWED_HOSTS", "grupomindhub.com.br,www.grupomindhub.com.br,localhost,127.0.0.1")
+)
+
+CSRF_TRUSTED_ORIGINS = _split_env_list(
+    os.getenv(
+        "DJANGO_CSRF_TRUSTED_ORIGINS",
+        "https://grupomindhub.com.br,https://www.grupomindhub.com.br,http://localhost,http://127.0.0.1",
+    )
+)
 
 INSTALLED_APPS = [
     'django.contrib.admin',
