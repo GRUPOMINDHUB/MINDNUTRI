@@ -309,7 +309,7 @@ def api_conexao_status(request):
         'api_url': s.EVOLUTION_API_URL,
         'api_key_masked': masked,
         'painel_url': s.EVOLUTION_API_URL.rstrip('/'),
-        'webhook_url': f"http://SEU_HOST:8000/agente/webhook/",
+        'webhook_url': f"{getattr(s, 'SITE_URL', 'http://localhost:8000')}/agente/webhook/",
     }
 
     return JsonResponse({'ok': True, **result})

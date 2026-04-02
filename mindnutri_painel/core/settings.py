@@ -162,6 +162,14 @@ if not DEBUG:
     SESSION_COOKIE_SECURE = True
     CSRF_COOKIE_SECURE = True
     SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
+    CSRF_TRUSTED_ORIGINS = [
+        f"https://{h.strip()}"
+        for h in os.getenv("DJANGO_ALLOWED_HOSTS", "").split(",")
+        if h.strip()
+    ]
+
+# ── Site URL (para webhooks, links externos) ───────────────────
+SITE_URL = os.getenv("SITE_URL", "http://localhost:8000")
 
 # ── Mindnutri Configs ────────────────────────────────────────────
 # OpenAI
