@@ -53,7 +53,7 @@ ROOT_URLCONF = 'core.urls'
 TEMPLATES = [
     {
         'BACKEND': 'django.template.backends.django.DjangoTemplates',
-        'DIRS': [],
+        'DIRS': [BASE_DIR / 'templates'],
         'APP_DIRS': True,
         'OPTIONS': {
             'context_processors': [
@@ -150,9 +150,9 @@ if _SENTRY_DSN:
     except ImportError:
         pass
 
-LOGIN_URL = '/admin/login/'
-LOGIN_REDIRECT_URL = '/admin/'
-LOGOUT_REDIRECT_URL = '/admin/login/'
+LOGIN_URL = '/mindnutri/login/'
+LOGIN_REDIRECT_URL = '/mindnutri/admin/'
+LOGOUT_REDIRECT_URL = '/mindnutri/login/'
 
 # ── HTTPS / Cookies seguros em produção ──────────────────────────
 if not DEBUG:
